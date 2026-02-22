@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+RUNTIME_DIR="$ROOT_DIR/runtime/server"
+PID_FILE="$RUNTIME_DIR/codexclaw.pid"
+LOG_FILE="$RUNTIME_DIR/codexclaw.log"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./server start [-f|--foreground]   Start service (default: background)
+  ./server stop                      Stop service
+  ./server status                    Show service status
+  ./server help                      Show this help
+
+Tips:
+  ./start         -> background start
+  ./start -f      -> foreground start with logs
+USAGE
+}
+
+read_env_from_file() {
+  local key="$1"
+  local value
+  value="$(grep -E "^${key}=" .env | tail -n1 | cut -d'=' -f2- || true)"
+  echo "$value"
+}
+
+set_env_in_file() {
+  local key="$1"
+  local value="$2"
+  if grep -qE "^${key}=" .env; then
+    sed -i "s|^${key}=.*|${key}=${value}|" .env
+  else
+    echo "${key}=${value}" >> .env
+  fi
+}
+
+get_effective_value() {
+  local key="$1"
+  if [[ -n "${!key:-}" ]]; then
+    echo "${!key}"
+    return
+  fi
+  read_env_from_file "$key"
+}
+
+prompt_if_empty() {
+  local key="$1"
+  local prompt_text="$2"
+  local current
+  current="$(get_effective_value "$key")"
+  if [[ -n "$current" ]]; then
+    echo "[INFO] ${key} 已配置"
+    return
+  fi
+
+  if [[ ! -t 0 ]]; then
+    echo "[ERROR] ${key} 未配置，且当前非交互终端，无法输入。"
+    exit 1
+  fi
+
+  read -r -p "$prompt_text" input
+  if [[ -z "$input" ]]; then
+    echo "[ERROR] ${key} 不能为空"
+    exit 1
+  fi
+  set_env_in_file "$key" "$input"
+}
+
+is_running() {
+  if [[ ! -f "$PID_FILE" ]]; then
+    return 1
+  fi
+
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [[ -z "$pid" || ! "$pid" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  if kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_runtime_paths() {
+  mkdir -p "$RUNTIME_DIR"
+}
+
+ensure_prerequisites() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "[ERROR] 未找到 python3，请先安装 Python 3.10+"
+    exit 1
+  fi
+
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "[ERROR] 未找到 codex CLI，请先在 root 环境完成 codex 安装与登录。"
+    exit 1
+  fi
+
+  if [[ ! -f .env ]]; then
+    cp .env.example .env
+  fi
+
+  if [[ ! -d .venv ]]; then
+    python3 -m venv .venv
+  fi
+
+  source .venv/bin/activate
+  python -m pip install --upgrade pip >/dev/null
+  python -m pip install -r requirements.txt >/dev/null
+
+  prompt_if_empty "FEISHU_APP_ID" "请输入 Feishu App ID (cli_xxx): "
+  prompt_if_empty "FEISHU_APP_SECRET" "请输入 Feishu App Secret: "
+
+  if [[ -z "$(read_env_from_file CODEX_PERMISSION_MODE)" ]]; then
+    set_env_in_file "CODEX_PERMISSION_MODE" "full"
+  fi
+
+  if [[ -z "$(read_env_from_file CODEX_WORK_DIR)" ]]; then
+    set_env_in_file "CODEX_WORK_DIR" "./runtime/codex-workdir"
+  fi
+
+  local work_dir
+  work_dir="$(get_effective_value CODEX_WORK_DIR)"
+  mkdir -p "$work_dir"
+  echo "[INFO] Codex 工作目录: $work_dir"
+}
+
+start_server() {
+  local foreground="${1:-0}"
+  ensure_runtime_paths
+
+  if is_running; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+    echo "[INFO] 服务已在运行，PID=$pid"
+    return 0
+  fi
+
+  if [[ -f "$PID_FILE" ]]; then
+    rm -f "$PID_FILE"
+  fi
+
+  ensure_prerequisites
+
+  local host port
+  host="$(get_effective_value SERVER_HOST)"
+  port="$(get_effective_value SERVER_PORT)"
+  [[ -z "$host" ]] && host="0.0.0.0"
+  [[ -z "$port" ]] && port="8080"
+
+  local cmd=(python -m uvicorn app.main:app --host "$host" --port "$port")
+
+  if [[ "$foreground" == "1" ]]; then
+    echo "[INFO] 前台启动中: ${cmd[*]}"
+    exec "${cmd[@]}"
+  fi
+
+  echo "[INFO] 后台启动中..."
+  nohup "${cmd[@]}" >>"$LOG_FILE" 2>&1 &
+  local pid=$!
+  echo "$pid" > "$PID_FILE"
+
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "[INFO] 启动成功，PID=$pid"
+    echo "[INFO] 日志文件: $LOG_FILE"
+  else
+    echo "[ERROR] 启动失败，请检查日志: $LOG_FILE"
+    tail -n 50 "$LOG_FILE" 2>/dev/null || true
+    rm -f "$PID_FILE"
+    exit 1
+  fi
+}
+
+stop_server() {
+  ensure_runtime_paths
+
+  if ! is_running; then
+    if [[ -f "$PID_FILE" ]]; then
+      rm -f "$PID_FILE"
+    fi
+    echo "[INFO] 服务未运行"
+    return 0
+  fi
+
+  local pid
+  pid="$(cat "$PID_FILE")"
+  echo "[INFO] 正在停止服务，PID=$pid"
+  kill "$pid" 2>/dev/null || true
+
+  local i
+  for i in $(seq 1 20); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$PID_FILE"
+      echo "[INFO] 服务已停止"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "[WARN] 普通停止超时，执行强制停止"
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  echo "[INFO] 服务已强制停止"
+}
+
+status_server() {
+  ensure_runtime_paths
+
+  if is_running; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+    echo "[INFO] 服务运行中，PID=$pid"
+    echo "[INFO] 日志文件: $LOG_FILE"
+    return 0
+  fi
+
+  if [[ -f "$PID_FILE" ]]; then
+    rm -f "$PID_FILE"
+  fi
+  echo "[INFO] 服务未运行"
+}
+
+main() {
+  local cmd="${1:-start}"
+  case "$cmd" in
+    start)
+      shift || true
+      if [[ "${1:-}" == "-f" || "${1:-}" == "--foreground" ]]; then
+        start_server 1
+      else
+        start_server 0
+      fi
+      ;;
+    stop)
+      stop_server
+      ;;
+    status)
+      status_server
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      echo "[ERROR] 未知命令: $cmd"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

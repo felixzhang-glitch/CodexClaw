@@ -1,0 +1,278 @@
+# CodexClaw 开发文档
+
+本文档面向后续维护和二次开发，聚焦代码结构、运行链路、关键配置和常见改造点。
+
+## 1. 项目定位
+
+CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
+
+1. 接收 Feishu 事件回调。
+2. 解析/校验消息并维护会话上下文。
+3. 调用本机 `codex exec`（默认 `full` 权限）生成答案。
+4. 将结果回传 Feishu。
+
+当前实现特性：
+
+- 单实例服务（FastAPI + Uvicorn）
+- Feishu 文本消息闭环
+- 会话记忆（默认 10 轮 FIFO）
+- `/help`、`/new`、`/reset`
+- 快速回执（reaction: `emoji_type=Typing`）
+- 最终答案默认单条回复（超长时自动回退分段）
+- 结构化日志
+
+---
+
+## 2. 目录结构
+
+```text
+app/
+  config.py          # 环境变量与配置
+  logging.py         # JSON 结构化日志
+  commands.py        # /help /new /reset
+  main.py            # FastAPI 入口
+
+channel/feishu/
+  models.py          # Feishu 事件解析模型
+  security.py        # 签名校验与解密
+  client.py          # Feishu OpenAPI 调用（reply/reaction/token）
+  handler.py         # Feishu webhook 主处理流程
+
+core/codex/
+  client.py          # 本机 codex CLI 调用封装（超时/重试/熔断）
+
+core/session/
+  manager.py         # 会话存储与 FIFO 裁剪
+  deduplicator.py    # message_id 去重
+
+tests/               # 单元测试
+
+server               # 服务控制脚本（start/stop/status/help）
+start                # 快捷入口（默认后台，-f 前台）
+start.sh             # 兼容入口（转发到 start）
+.env.example         # 示例配置
+README.md            # 用户使用说明
+DEVELOPMENT.md       # 本文档
+```
+
+---
+
+## 3. 启动与进程管理
+
+### 3.1 命令入口
+
+- `./start`：后台启动（等价 `./server start`）
+- `./start -f`：前台启动并输出日志（等价 `./server start -f`）
+- `./server stop`：停止服务
+- `./server status`：查看状态
+- `./server help`：查看帮助
+
+### 3.2 运行期文件
+
+- PID 文件：`runtime/server/codexclaw.pid`
+- 日志文件：`runtime/server/codexclaw.log`
+- Codex 工作目录：`runtime/codex-workdir`（可由 `CODEX_WORK_DIR` 覆盖）
+
+### 3.3 首次启动流程
+
+`server` 脚本会自动：
+
+1. 检查 `python3` 和 `codex`。
+2. 自动创建 `.venv` 并安装依赖。
+3. 初始化 `.env`（若不存在则由 `.env.example` 复制）。
+4. 引导填写 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。
+5. 确保 `CODEX_PERMISSION_MODE=full`。
+6. 启动 Uvicorn。
+
+---
+
+## 4. 配置说明（核心）
+
+配置从 `.env` 读取，关键项如下。
+
+### 4.1 Feishu
+
+- `FEISHU_APP_ID`
+- `FEISHU_APP_SECRET`
+- `FEISHU_VERIFICATION_TOKEN`（可选，配置后会校验）
+- `FEISHU_ENCRYPT_KEY`（建议配置，用于签名校验/加密场景）
+- `FEISHU_API_BASE`（默认 `https://open.feishu.cn`）
+
+### 4.2 Codex CLI
+
+- `CODEX_CLI_BIN`（默认 `codex`）
+- `CODEX_WORK_DIR`（默认 `./runtime/codex-workdir`）
+- `CODEX_PERMISSION_MODE`（默认 `full`）
+- `CODEX_MODEL`（可空；空时使用本机 codex 默认模型）
+- `CODEX_TIMEOUT_SECONDS`
+- `CODEX_MAX_RETRIES`
+- `CODEX_RETRY_BACKOFF_SECONDS`
+- `CODEX_CIRCUIT_BREAKER_THRESHOLD`
+- `CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS`
+
+说明：
+
+- 当前后端不依赖 `CODEX_API_KEY`，因为走的是本机 `codex exec`。
+- 为兼容历史配置，保留了 `CODEX_API_BASE/CODEX_API_KEY` 字段，但 CLI 模式默认不用。
+
+### 4.3 业务行为
+
+- `MAX_HISTORY_ROUNDS`：会话记忆轮数，默认 `10`
+- `STREAMING_ENABLED`：是否启用流式获取（当前即使流式获取，也会汇总后单条回发）
+- `SERVER_HOST`
+- `SERVER_PORT`
+- `LOG_LEVEL`
+
+---
+
+## 5. 请求处理链路
+
+### 5.1 Webhook 入口
+
+`POST /webhook/feishu` -> `app/main.py` -> `FeishuWebhookHandler.handle_webhook`
+
+处理顺序：
+
+1. 解析 JSON 请求体
+2. 校验签名（如果带签名头）
+3. 处理 challenge（`url_verification`）
+4. 解析事件，仅接受 `im.message.receive_v1` + `text` + `p2p`
+5. 异步处理具体消息（立即返回 `{"code": 0}`）
+
+### 5.2 消息处理（_handle_text_event）
+
+1. 去重（`message_id`）
+2. 发送 quick ack reaction（`Typing`）
+3. 命令分支：`/help` `/new` `/reset`
+4. 读取会话历史，拼接当前问题
+5. 调用 Codex CLI
+6. 回发答案（单条）
+7. 写回会话历史
+
+异常时：记录错误日志并回复 `服务繁忙，请稍后重试。`
+
+---
+
+## 6. Codex CLI 集成细节
+
+文件：`core/codex/client.py`
+
+### 6.1 命令构造
+
+基础命令：
+
+```bash
+codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
+```
+
+权限映射：
+
+- `full` -> `--dangerously-bypass-approvals-and-sandbox`
+- `workspace-write` -> `--sandbox workspace-write --ask-for-approval never`
+- `read-only` -> `--sandbox read-only --ask-for-approval never`
+
+### 6.2 模型选择
+
+- 当 `CODEX_MODEL` 为空：不传 `-m`，使用本机 codex 默认模型。
+- 为兼容 ChatGPT 账号场景，`codex-mini-latest` 不会显式传入。
+
+### 6.3 事件解析
+
+`codex exec --json` 的输出按行读取 JSON event：
+
+- `item.completed` + `agent_message` 作为最终文本
+- `*delta*` 类型事件尝试提取增量文本
+- `error` / `turn.failed` / `item.completed(error)` 提取错误信息
+
+### 6.4 稳定性机制
+
+- 超时控制：`CODEX_TIMEOUT_SECONDS`
+- 重试：`CODEX_MAX_RETRIES` + 退避
+- 熔断：连续失败阈值后冷却窗口拒绝请求
+
+---
+
+## 7. 会话与记忆
+
+文件：`core/session/manager.py`
+
+- 会话 Key：`user_id + ':' + chat_id`
+- 每轮存储：`user` + `assistant`
+- 超出 `MAX_HISTORY_ROUNDS` 时，按 FIFO 删除最早轮次
+- `/new`：生成新会话 ID，清空上下文
+- `/reset`：清空当前会话轮次
+
+---
+
+## 8. Feishu 客户端能力
+
+文件：`channel/feishu/client.py`
+
+- 获取并缓存 `tenant_access_token`
+- 回复文本消息：`POST /im/v1/messages/{message_id}/reply`
+- 快速回执 reaction：`POST /im/v1/messages/{message_id}/reactions`
+  - 请求体：`{"reaction_type":{"emoji_type":"Typing"}}`
+
+---
+
+## 9. 测试说明
+
+运行：
+
+```bash
+source .venv/bin/activate
+pytest -q
+```
+
+当前测试覆盖：
+
+- Feishu 文本事件解析
+- Feishu 签名校验
+- 会话 FIFO 裁剪
+- `/new` 行为
+- Codex streaming mock
+- quick ack reaction + 单条最终回复行为
+- reaction 请求体校验（`Typing`）
+
+---
+
+## 10. 常见问题排查
+
+### 10.1 Feishu 401
+
+重点检查：
+
+- `FEISHU_ENCRYPT_KEY` 是否与平台一致
+- `FEISHU_VERIFICATION_TOKEN` 是否一致
+- 回调 URL 是否正确可达
+
+### 10.2 启动失败 address already in use
+
+端口被占用：
+
+- 换端口启动：`SERVER_PORT=18080 ./start`
+- 或先停掉旧进程
+
+### 10.3 收到“服务繁忙，请稍后重试”
+
+查看两类日志：
+
+- `runtime/server/codexclaw.log`
+- 控制台 JSON 日志中的 `event` 与 `error_code`
+
+常见根因：
+
+- codex CLI 未登录/不可执行
+- 模型不可用
+- codex 超时
+
+---
+
+## 11. 后续二开建议
+
+1. 增加持久化存储（Redis/DB）替换内存会话与去重。
+2. 支持群聊和 @ 提及策略。
+3. 把 quick ack 和最终回复模板做成可配置项。
+4. 增加 Prometheus 指标与健康探针细分。
+5. 增加集成测试（Mock Feishu webhook + Mock codex CLI）。
+
