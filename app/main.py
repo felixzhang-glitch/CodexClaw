@@ -12,6 +12,7 @@ from channel.feishu.handler import FeishuWebhookHandler
 from core.codex.client import CodexClient
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
+from core.session.task_registry import ActiveTaskRegistry
 
 settings = get_settings()
 setup_logging(settings.log_level)
@@ -21,6 +22,7 @@ app = FastAPI(title="CodexClaw", version="0.1.0")
 
 session_manager = SessionManager(max_history_rounds=settings.max_history_rounds)
 deduplicator = MessageDeduplicator(ttl_seconds=settings.deduplicate_ttl_seconds)
+task_registry = ActiveTaskRegistry()
 codex_client = CodexClient(settings=settings)
 feishu_client = FeishuClient(settings=settings)
 feishu_handler = FeishuWebhookHandler(
@@ -29,6 +31,7 @@ feishu_handler = FeishuWebhookHandler(
     codex_client=codex_client,
     session_manager=session_manager,
     deduplicator=deduplicator,
+    task_registry=task_registry,
 )
 
 

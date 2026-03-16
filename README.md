@@ -15,6 +15,7 @@
 - 最终答案默认单条回复（避免分段刷屏）
 - 会话记忆（`user_id + chat_id` 维度，默认 10 轮 FIFO 裁剪）
 - 命令支持：`/new`、`/reset`、`/help`
+- 运行中任务支持：超过阈值自动通知“仍在运行”，并可用 `/stop` 强制终止
 - 服务控制脚本：`server`（`start|stop|status|help`）
 - 快捷入口：`start`（默认后台，`-f` 前台）
 
@@ -109,6 +110,7 @@ https://<你的公网域名>/webhook/feishu
 - `/help`：显示帮助
 - `/new`：开启新会话（新 session_id，不继承旧上下文）
 - `/reset`：清空当前会话历史
+- `/stop`：终止当前会话中正在运行的任务
 
 ## 配置项
 
@@ -122,10 +124,13 @@ https://<你的公网域名>/webhook/feishu
 - `CODEX_WORK_DIR=./runtime/codex-workdir`
 - `CODEX_MODEL`（可空，留空时使用 codex CLI 默认模型）
 - `CODEX_PERMISSION_MODE=full`
+- `CODEX_TIMEOUT_SECONDS=30`
+- `CODEX_STREAM_READ_LIMIT_BYTES=262144`
 - `CODEX_CIRCUIT_BREAKER_THRESHOLD=5`
 - `CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS=30`
 - `MAX_HISTORY_ROUNDS=10`
 - `STREAMING_ENABLED=true`
+- `TASK_RUNNING_NOTICE_SECONDS=30`
 - `SERVER_PORT`
 - `LOG_LEVEL`
 

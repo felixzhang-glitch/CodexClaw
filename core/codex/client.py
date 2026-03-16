@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -18,13 +19,20 @@ class CodexClientError(RuntimeError):
     pass
 
 
+class CodexClientCancelled(CodexClientError):
+    pass
+
+
 class CodexClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._lock = threading.Lock()
+        self._process_lock = threading.Lock()
         self._consecutive_failures = 0
         self._circuit_open_until = 0.0
         self._stream_piece_chars = 80
+        self._active_processes: dict[str, asyncio.subprocess.Process] = {}
+        self._cancel_requests: set[str] = set()
 
         self._codex_bin = settings.codex_cli_bin
         self._work_dir = os.path.abspath(settings.codex_work_dir)
@@ -42,41 +50,52 @@ class CodexClient:
         attempt = 0
         start = time.monotonic()
 
-        while True:
-            try:
-                text = await self._run_chat_once(prompt=prompt)
-                self._record_success()
-                duration_ms = int((time.monotonic() - start) * 1000)
-                logger.info(
-                    "codex cli chat completed",
-                    extra={
-                        "trace_id": trace_id,
-                        "event": "codex.chat",
-                        "duration_ms": duration_ms,
-                        "status_code": 0,
-                        "request_summary": request_summary,
-                        "response_summary": self._truncate(text),
-                    },
-                )
-                return text
-            except CodexClientError as exc:
-                if not self._should_retry(exc) or attempt >= self._settings.codex_max_retries:
-                    self._record_failure()
+        try:
+            while True:
+                try:
+                    text = await self._run_chat_once(prompt=prompt, trace_id=trace_id)
+                    self._record_success()
                     duration_ms = int((time.monotonic() - start) * 1000)
-                    logger.error(
-                        "codex cli chat failed",
+                    logger.info(
+                        "codex cli chat completed",
                         extra={
                             "trace_id": trace_id,
                             "event": "codex.chat",
                             "duration_ms": duration_ms,
-                            "status_code": 1,
-                            "error_code": type(exc).__name__,
+                            "status_code": 0,
                             "request_summary": request_summary,
+                            "response_summary": self._truncate(text),
                         },
                     )
+                    return text
+                except CodexClientCancelled:
+                    logger.info(
+                        "codex cli chat cancelled",
+                        extra={"trace_id": trace_id, "event": "codex.chat", "status_code": 499},
+                    )
                     raise
-                await asyncio.sleep(self._settings.codex_retry_backoff_seconds * (2**attempt))
-                attempt += 1
+                except CodexClientError as exc:
+                    if not self._should_retry(exc) or attempt >= self._settings.codex_max_retries:
+                        self._record_failure()
+                        duration_ms = int((time.monotonic() - start) * 1000)
+                        logger.error(
+                            "codex cli chat failed",
+                            extra={
+                                "trace_id": trace_id,
+                                "event": "codex.chat",
+                                "duration_ms": duration_ms,
+                                "status_code": 1,
+                                "error_code": type(exc).__name__,
+                                "request_summary": request_summary,
+                            },
+                        )
+                        raise
+                    self._raise_if_cancelled(trace_id)
+                    await asyncio.sleep(self._settings.codex_retry_backoff_seconds * (2**attempt))
+                    self._raise_if_cancelled(trace_id)
+                    attempt += 1
+        finally:
+            self._clear_cancel_request(trace_id)
 
     async def chat_stream(self, messages: list[dict[str, str]], trace_id: str) -> AsyncIterator[str]:
         self._assert_circuit_closed()
@@ -86,70 +105,103 @@ class CodexClient:
         attempt = 0
         start = time.monotonic()
 
-        while True:
-            emitted = False
-            preview_parts: list[str] = []
-            try:
-                async for piece in self._run_stream_once(prompt=prompt):
-                    emitted = True
-                    if len("".join(preview_parts)) < 240:
-                        preview_parts.append(piece)
-                    yield piece
+        try:
+            while True:
+                emitted = False
+                preview_parts: list[str] = []
+                try:
+                    async for piece in self._run_stream_once(prompt=prompt, trace_id=trace_id):
+                        emitted = True
+                        if len("".join(preview_parts)) < 240:
+                            preview_parts.append(piece)
+                        yield piece
 
-                self._record_success()
-                duration_ms = int((time.monotonic() - start) * 1000)
-                logger.info(
-                    "codex cli stream completed",
-                    extra={
-                        "trace_id": trace_id,
-                        "event": "codex.stream",
-                        "duration_ms": duration_ms,
-                        "status_code": 0,
-                        "request_summary": request_summary,
-                        "response_summary": self._truncate("".join(preview_parts)),
-                    },
-                )
-                return
-            except CodexClientError as exc:
-                if emitted:
-                    self._record_failure()
+                    self._record_success()
                     duration_ms = int((time.monotonic() - start) * 1000)
-                    logger.error(
-                        "codex cli stream interrupted after partial output",
+                    logger.info(
+                        "codex cli stream completed",
                         extra={
                             "trace_id": trace_id,
                             "event": "codex.stream",
                             "duration_ms": duration_ms,
-                            "status_code": 1,
-                            "error_code": type(exc).__name__,
+                            "status_code": 0,
+                            "request_summary": request_summary,
+                            "response_summary": self._truncate("".join(preview_parts)),
+                        },
+                    )
+                    return
+                except CodexClientCancelled:
+                    duration_ms = int((time.monotonic() - start) * 1000)
+                    logger.info(
+                        "codex cli stream cancelled",
+                        extra={
+                            "trace_id": trace_id,
+                            "event": "codex.stream",
+                            "duration_ms": duration_ms,
+                            "status_code": 499,
                             "request_summary": request_summary,
                             "response_summary": self._truncate("".join(preview_parts)),
                         },
                     )
                     raise
+                except CodexClientError as exc:
+                    if emitted:
+                        self._record_failure()
+                        duration_ms = int((time.monotonic() - start) * 1000)
+                        logger.error(
+                            "codex cli stream interrupted after partial output",
+                            extra={
+                                "trace_id": trace_id,
+                                "event": "codex.stream",
+                                "duration_ms": duration_ms,
+                                "status_code": 1,
+                                "error_code": type(exc).__name__,
+                                "request_summary": request_summary,
+                                "response_summary": self._truncate("".join(preview_parts)),
+                            },
+                        )
+                        raise
 
-                if not self._should_retry(exc) or attempt >= self._settings.codex_max_retries:
-                    self._record_failure()
-                    duration_ms = int((time.monotonic() - start) * 1000)
-                    logger.error(
-                        "codex cli stream failed",
-                        extra={
-                            "trace_id": trace_id,
-                            "event": "codex.stream",
-                            "duration_ms": duration_ms,
-                            "status_code": 1,
-                            "error_code": type(exc).__name__,
-                            "request_summary": request_summary,
-                        },
-                    )
-                    raise
+                    if not self._should_retry(exc) or attempt >= self._settings.codex_max_retries:
+                        self._record_failure()
+                        duration_ms = int((time.monotonic() - start) * 1000)
+                        logger.error(
+                            "codex cli stream failed",
+                            extra={
+                                "trace_id": trace_id,
+                                "event": "codex.stream",
+                                "duration_ms": duration_ms,
+                                "status_code": 1,
+                                "error_code": type(exc).__name__,
+                                "request_summary": request_summary,
+                            },
+                        )
+                        raise
 
-                await asyncio.sleep(self._settings.codex_retry_backoff_seconds * (2**attempt))
-                attempt += 1
+                    self._raise_if_cancelled(trace_id)
+                    await asyncio.sleep(self._settings.codex_retry_backoff_seconds * (2**attempt))
+                    self._raise_if_cancelled(trace_id)
+                    attempt += 1
+        finally:
+            self._clear_cancel_request(trace_id)
 
-    async def _run_chat_once(self, prompt: str) -> str:
+    def cancel(self, trace_id: str) -> bool:
+        with self._process_lock:
+            self._cancel_requests.add(trace_id)
+            process = self._active_processes.get(trace_id)
+
+        if process is None:
+            return False
+
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+        return True
+
+    async def _run_chat_once(self, prompt: str, trace_id: str) -> str:
         command = self._build_command(prompt)
         process = await self._spawn_process(command)
+        self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
 
         completed_message = ""
@@ -158,6 +210,7 @@ class CodexClient:
 
         try:
             while True:
+                self._raise_if_cancelled(trace_id)
                 line = await self._readline_with_timeout(process.stdout)
                 if not line:
                     break
@@ -181,11 +234,15 @@ class CodexClient:
         except asyncio.TimeoutError as exc:
             await self._terminate_process(process)
             stderr_text = await stderr_task
+            self._raise_if_cancelled(trace_id)
             raise CodexClientError(f"codex cli timeout: {self._truncate(stderr_text)}") from exc
+        finally:
+            self._unregister_process(trace_id)
 
         return_code = await process.wait()
         stderr_text = await stderr_task
 
+        self._raise_if_cancelled(trace_id)
         if return_code != 0:
             error_hint = " | ".join(error_messages).strip() or "\n".join(fallback_parts).strip() or stderr_text.strip()
             raise CodexClientError(
@@ -198,9 +255,10 @@ class CodexClient:
         fallback = "\n".join(fallback_parts).strip()
         return fallback
 
-    async def _run_stream_once(self, prompt: str) -> AsyncIterator[str]:
+    async def _run_stream_once(self, prompt: str, trace_id: str) -> AsyncIterator[str]:
         command = self._build_command(prompt)
         process = await self._spawn_process(command)
+        self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
 
         saw_incremental = False
@@ -210,6 +268,7 @@ class CodexClient:
 
         try:
             while True:
+                self._raise_if_cancelled(trace_id)
                 line = await self._readline_with_timeout(process.stdout)
                 if not line:
                     break
@@ -243,11 +302,15 @@ class CodexClient:
         except asyncio.TimeoutError as exc:
             await self._terminate_process(process)
             stderr_text = await stderr_task
+            self._raise_if_cancelled(trace_id)
             raise CodexClientError(f"codex cli timeout: {self._truncate(stderr_text)}") from exc
+        finally:
+            self._unregister_process(trace_id)
 
         return_code = await process.wait()
         stderr_text = await stderr_task
 
+        self._raise_if_cancelled(trace_id)
         if return_code != 0:
             error_hint = " | ".join(error_messages).strip() or "\n".join(fallback_parts).strip() or stderr_text.strip()
             raise CodexClientError(
@@ -295,6 +358,7 @@ class CodexClient:
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=self._settings.codex_stream_read_limit_bytes,
         )
 
     async def _readline_with_timeout(self, stream: asyncio.StreamReader | None) -> bytes:
@@ -315,6 +379,24 @@ class CodexClient:
             return
         process.kill()
         await process.wait()
+
+    def _register_process(self, trace_id: str, process: asyncio.subprocess.Process) -> None:
+        with self._process_lock:
+            self._active_processes[trace_id] = process
+
+    def _unregister_process(self, trace_id: str) -> None:
+        with self._process_lock:
+            self._active_processes.pop(trace_id, None)
+
+    def _raise_if_cancelled(self, trace_id: str) -> None:
+        with self._process_lock:
+            if trace_id not in self._cancel_requests:
+                return
+        raise CodexClientCancelled("codex cli cancelled by user")
+
+    def _clear_cancel_request(self, trace_id: str) -> None:
+        with self._process_lock:
+            self._cancel_requests.discard(trace_id)
 
     @staticmethod
     def _parse_event(line: str) -> dict[str, Any] | None:

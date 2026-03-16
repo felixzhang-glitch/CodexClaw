@@ -23,9 +23,10 @@ from channel.feishu.security import (
     decrypt_event_payload,
     verify_request_signature,
 )
-from core.codex.client import CodexClient, CodexClientError
+from core.codex.client import CodexClient, CodexClientCancelled, CodexClientError
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
+from core.session.task_registry import ActiveTaskRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,14 @@ class FeishuWebhookHandler:
         codex_client: CodexClient,
         session_manager: SessionManager,
         deduplicator: MessageDeduplicator,
+        task_registry: ActiveTaskRegistry,
     ) -> None:
         self._settings = settings
         self._feishu_client = feishu_client
         self._codex_client = codex_client
         self._sessions = session_manager
         self._deduplicator = deduplicator
+        self._task_registry = task_registry
 
     async def handle_webhook(self, headers: Mapping[str, str], raw_body: bytes) -> dict[str, Any]:
         trace_id = uuid.uuid4().hex
@@ -70,9 +73,25 @@ class FeishuWebhookHandler:
             logger.info("duplicate message ignored", extra={"trace_id": trace_id, "event": "feishu.deduplicate"})
             return
 
+        session_key = SessionManager.build_key(user_id=event.user_id, chat_id=event.chat_id)
+        normalized_text = event.text.strip().lower()
+
+        if normalized_text == "/stop":
+            await self._handle_stop_command(message_id=event.message_id, session_key=session_key, trace_id=trace_id)
+            return
+
         await self._send_quick_ack(message_id=event.message_id, trace_id=trace_id)
 
-        session_key = SessionManager.build_key(user_id=event.user_id, chat_id=event.chat_id)
+        active_task = self._task_registry.get(session_key)
+        if active_task is not None:
+            await self._safe_reply(
+                message_id=event.message_id,
+                text="当前已有任务在运行中。发送 /stop 可强制终止后再试。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-busy",
+            )
+            return
+
         command = process_command(event.text, session_manager=self._sessions, session_key=session_key)
         if command is not None:
             await self._safe_reply(
@@ -85,6 +104,27 @@ class FeishuWebhookHandler:
 
         history_messages = self._sessions.build_messages(session_key)
         messages = history_messages + [{"role": "user", "content": event.text}]
+        started = self._task_registry.start(
+            key=session_key,
+            trace_id=trace_id,
+            message_id=event.message_id,
+            cancel_callback=lambda: self._codex_client.cancel(trace_id),
+        )
+        if not started:
+            await self._safe_reply(
+                message_id=event.message_id,
+                text="当前已有任务在运行中。发送 /stop 可强制终止后再试。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-busy",
+            )
+            return
+        notice_task = asyncio.create_task(
+            self._notify_if_still_running(
+                session_key=session_key,
+                message_id=event.message_id,
+                trace_id=trace_id,
+            )
+        )
 
         try:
             if self._settings.streaming_enabled:
@@ -94,9 +134,16 @@ class FeishuWebhookHandler:
                 await self._safe_reply(message_id=event.message_id, text=answer, trace_id=trace_id)
 
             self._sessions.append_round(key=session_key, user=event.text, assistant=answer)
+        except CodexClientCancelled:
+            logger.info("message cancelled by user", extra={"trace_id": trace_id, "event": "pipeline.cancel"})
+            await self._safe_reply(message_id=event.message_id, text="当前任务已终止。", trace_id=trace_id)
         except (CodexClientError, FeishuClientError, Exception):
             logger.exception("failed to process message", extra={"trace_id": trace_id, "event": "pipeline.error"})
             await self._safe_reply(message_id=event.message_id, text="服务繁忙，请稍后重试。", trace_id=trace_id)
+        finally:
+            notice_task.cancel()
+            await asyncio.gather(notice_task, return_exceptions=True)
+            self._task_registry.finish(key=session_key, trace_id=trace_id)
 
     async def _stream_to_feishu(self, message_id: str, messages: list[dict[str, str]], trace_id: str) -> str:
         start = time.monotonic()
@@ -125,6 +172,39 @@ class FeishuWebhookHandler:
             },
         )
         return answer
+
+    async def _notify_if_still_running(self, session_key: str, message_id: str, trace_id: str) -> None:
+        await asyncio.sleep(self._settings.task_running_notice_seconds)
+        active_task = self._task_registry.get(session_key)
+        if active_task is None or active_task.trace_id != trace_id:
+            return
+        if not self._task_registry.mark_notice_sent(session_key, trace_id):
+            return
+
+        await self._safe_reply(
+            message_id=message_id,
+            text="任务仍在运行中，我会继续处理；如需强制终止请发送 /stop。",
+            trace_id=trace_id,
+            request_uuid=f"{message_id}-running",
+        )
+
+    async def _handle_stop_command(self, message_id: str, session_key: str, trace_id: str) -> None:
+        task = self._task_registry.cancel(session_key)
+        if task is None:
+            await self._safe_reply(
+                message_id=message_id,
+                text="当前没有可终止的运行中任务。",
+                trace_id=trace_id,
+                request_uuid=f"{message_id}-stop-idle",
+            )
+            return
+
+        await self._safe_reply(
+            message_id=message_id,
+            text="已收到停止请求，正在强制终止当前任务。",
+            trace_id=trace_id,
+            request_uuid=f"{message_id}-stop",
+        )
 
     async def _safe_reply(
         self,

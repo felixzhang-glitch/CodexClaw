@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     codex_work_dir: str = Field(default="./runtime/codex-workdir", validation_alias="CODEX_WORK_DIR")
     codex_permission_mode: str = Field(default="full", validation_alias="CODEX_PERMISSION_MODE")
     codex_timeout_seconds: float = Field(default=30.0, validation_alias="CODEX_TIMEOUT_SECONDS")
+    codex_stream_read_limit_bytes: int = Field(default=262144, validation_alias="CODEX_STREAM_READ_LIMIT_BYTES")
     codex_max_retries: int = Field(default=2, validation_alias="CODEX_MAX_RETRIES")
     codex_retry_backoff_seconds: float = Field(default=1.0, validation_alias="CODEX_RETRY_BACKOFF_SECONDS")
     codex_circuit_breaker_threshold: int = Field(default=5, validation_alias="CODEX_CIRCUIT_BREAKER_THRESHOLD")
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
 
     max_history_rounds: int = Field(default=10, validation_alias="MAX_HISTORY_ROUNDS")
     streaming_enabled: bool = Field(default=True, validation_alias="STREAMING_ENABLED")
+    task_running_notice_seconds: float = Field(default=30.0, validation_alias="TASK_RUNNING_NOTICE_SECONDS")
     feishu_message_chunk_chars: int = Field(default=120, validation_alias="FEISHU_MESSAGE_CHUNK_CHARS")
     feishu_stream_flush_seconds: float = Field(default=1.0, validation_alias="FEISHU_STREAM_FLUSH_SECONDS")
     deduplicate_ttl_seconds: int = Field(default=3600, validation_alias="DEDUPLICATE_TTL_SECONDS")

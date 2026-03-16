@@ -53,6 +53,7 @@ async def test_codex_streaming_mock() -> None:
         codex_model="codex-mini-latest",
         codex_permission_mode="full",
         codex_timeout_seconds=30.0,
+        codex_stream_read_limit_bytes=262144,
         codex_max_retries=1,
         codex_retry_backoff_seconds=0.01,
         codex_circuit_breaker_threshold=5,

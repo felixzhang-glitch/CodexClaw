@@ -16,8 +16,10 @@ CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
 - 单实例服务（FastAPI + Uvicorn）
 - Feishu 文本消息闭环
 - 会话记忆（默认 10 轮 FIFO）
-- `/help`、`/new`、`/reset`
+- `/help`、`/new`、`/reset`、`/stop`
 - 快速回执（reaction: `emoji_type=Typing`）
+- 长任务通知（默认 30 秒后提示“仍在运行中”）
+- 同一会话同一时刻只允许一个运行中任务
 - 最终答案默认单条回复（超长时自动回退分段）
 - 结构化日志
 
@@ -29,7 +31,7 @@ CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
 app/
   config.py          # 环境变量与配置
   logging.py         # JSON 结构化日志
-  commands.py        # /help /new /reset
+  commands.py        # /help /new /reset /stop
   main.py            # FastAPI 入口
 
 channel/feishu/
@@ -44,6 +46,7 @@ core/codex/
 core/session/
   manager.py         # 会话存储与 FIFO 裁剪
   deduplicator.py    # message_id 去重
+  task_registry.py   # 运行中任务注册与取消
 
 tests/               # 单元测试
 
@@ -104,7 +107,8 @@ DEVELOPMENT.md       # 本文档
 - `CODEX_WORK_DIR`（默认 `./runtime/codex-workdir`）
 - `CODEX_PERMISSION_MODE`（默认 `full`）
 - `CODEX_MODEL`（可空；空时使用本机 codex 默认模型）
-- `CODEX_TIMEOUT_SECONDS`
+- `CODEX_TIMEOUT_SECONDS`：单次读取 stdout 新行的超时时间，不是总任务时长上限
+- `CODEX_STREAM_READ_LIMIT_BYTES`：subprocess stream 读取上限，避免超长单行 JSON 触发默认 64KB 限制
 - `CODEX_MAX_RETRIES`
 - `CODEX_RETRY_BACKOFF_SECONDS`
 - `CODEX_CIRCUIT_BREAKER_THRESHOLD`
@@ -119,6 +123,7 @@ DEVELOPMENT.md       # 本文档
 
 - `MAX_HISTORY_ROUNDS`：会话记忆轮数，默认 `10`
 - `STREAMING_ENABLED`：是否启用流式获取（当前即使流式获取，也会汇总后单条回发）
+- `TASK_RUNNING_NOTICE_SECONDS`：长任务通知阈值，默认 `30`
 - `SERVER_HOST`
 - `SERVER_PORT`
 - `LOG_LEVEL`
@@ -142,12 +147,19 @@ DEVELOPMENT.md       # 本文档
 ### 5.2 消息处理（_handle_text_event）
 
 1. 去重（`message_id`）
-2. 发送 quick ack reaction（`Typing`）
-3. 命令分支：`/help` `/new` `/reset`
-4. 读取会话历史，拼接当前问题
-5. 调用 Codex CLI
-6. 回发答案（单条）
-7. 写回会话历史
+2. 基于 `user_id + chat_id` 生成 session key
+3. 特判 `/stop`：终止当前会话中的运行任务
+4. 发送 quick ack reaction（`Typing`）
+5. 若当前会话已有运行中任务，直接回复“已有任务在运行中”
+6. 命令分支：`/help` `/new` `/reset`
+7. 读取会话历史，拼接当前问题
+8. 在 `task_registry` 中登记运行任务并启动长任务通知定时器
+9. 调用 Codex CLI
+10. 回发答案（单条）
+11. 写回会话历史
+12. 清理运行任务登记与定时器
+
+取消时：回复 `当前任务已终止。`
 
 异常时：记录错误日志并回复 `服务繁忙，请稍后重试。`
 
@@ -189,6 +201,18 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 - 超时控制：`CODEX_TIMEOUT_SECONDS`
 - 重试：`CODEX_MAX_RETRIES` + 退避
 - 熔断：连续失败阈值后冷却窗口拒绝请求
+- 取消：通过 `trace_id` 注册当前 `codex exec` 子进程，`/stop` 时调用 `process.kill()`
+- 大行保护：subprocess 使用 `CODEX_STREAM_READ_LIMIT_BYTES` 提高 asyncio stream limit
+
+### 6.5 取消与长任务通知
+
+- 运行任务按会话维度注册在 `core/session/task_registry.py`
+- 每个运行任务记录 `trace_id`、`message_id`、启动时间和通知状态
+- 超过 `TASK_RUNNING_NOTICE_SECONDS` 且任务仍在运行时，会主动发送“仍在运行中”提示
+- 用户发送 `/stop` 后：
+  - 立即回复“已收到停止请求，正在强制终止当前任务。”
+  - 杀掉当前 `codex exec` 子进程
+  - 在主任务收敛后回复“当前任务已终止。”
 
 ---
 
@@ -201,6 +225,11 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 - 超出 `MAX_HISTORY_ROUNDS` 时，按 FIFO 删除最早轮次
 - `/new`：生成新会话 ID，清空上下文
 - `/reset`：清空当前会话轮次
+
+补充：
+
+- 当前运行中任务不在 `SessionManager` 中管理，而是在 `task_registry` 中独立管理
+- 这样可以把“会话历史”和“运行态控制”解耦，便于后续替换成 Redis/DB
 
 ---
 
@@ -232,6 +261,8 @@ pytest -q
 - `/new` 行为
 - Codex streaming mock
 - quick ack reaction + 单条最终回复行为
+- 长任务通知行为
+- `/stop` 取消运行中任务
 - reaction 请求体校验（`Typing`）
 
 ---
@@ -265,6 +296,33 @@ pytest -q
 - codex CLI 未登录/不可执行
 - 模型不可用
 - codex 超时
+- 超长任务中途长时间无输出
+- `codex exec --json` 输出单行过长
+
+重点看：
+
+- `event=pipeline.error`
+- `event=codex.stream` / `event=codex.chat`
+- `error_code=CodexClientError`
+
+如果近期问题集中在复杂任务：
+
+- 先确认 `.env` 中 `CODEX_TIMEOUT_SECONDS` 是否已调高
+- 再确认 `TASK_RUNNING_NOTICE_SECONDS` 是否符合预期
+- 如果日志里出现 `chunk is longer than limit`，需要提高 `CODEX_STREAM_READ_LIMIT_BYTES`
+
+### 10.4 `/stop` 没有终止任务
+
+优先检查：
+
+- 是否是同一会话发送的 `/stop`（同 `user_id + chat_id`）
+- 日志里是否有 `event=pipeline.cancel`
+- 当前运行中的 `codex exec` 是否已被外部回收
+
+已知限制：
+
+- `/stop` 只终止当前会话中的一条活动任务
+- 如果任务已经自然结束，再发 `/stop` 会返回“当前没有可终止的运行中任务。”
 
 ---
 
@@ -273,6 +331,6 @@ pytest -q
 1. 增加持久化存储（Redis/DB）替换内存会话与去重。
 2. 支持群聊和 @ 提及策略。
 3. 把 quick ack 和最终回复模板做成可配置项。
-4. 增加 Prometheus 指标与健康探针细分。
-5. 增加集成测试（Mock Feishu webhook + Mock codex CLI）。
-
+4. 增加 `/status` 命令，返回当前任务状态、已运行时长、是否已收到停止请求。
+5. 增加 Prometheus 指标与健康探针细分。
+6. 增加集成测试（Mock Feishu webhook + Mock codex CLI）。
