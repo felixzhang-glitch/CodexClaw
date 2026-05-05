@@ -164,7 +164,11 @@ start_server() {
   fi
 
   echo "[INFO] 后台启动中..."
-  nohup "${cmd[@]}" >>"$LOG_FILE" 2>&1 &
+  if command -v setsid >/dev/null 2>&1; then
+    setsid nohup "${cmd[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
+  else
+    nohup "${cmd[@]}" >>"$LOG_FILE" 2>&1 < /dev/null &
+  fi
   local pid=$!
   echo "$pid" > "$PID_FILE"
 

@@ -12,6 +12,7 @@ from channel.feishu.handler import FeishuWebhookHandler
 from core.codex.client import CodexClient
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
+from core.session.reminder_scheduler import ReminderScheduler
 from core.session.task_registry import ActiveTaskRegistry
 
 settings = get_settings()
@@ -25,6 +26,19 @@ deduplicator = MessageDeduplicator(ttl_seconds=settings.deduplicate_ttl_seconds)
 task_registry = ActiveTaskRegistry()
 codex_client = CodexClient(settings=settings)
 feishu_client = FeishuClient(settings=settings)
+
+
+async def send_reminder(chat_id: str, text: str, trace_id: str) -> None:
+    await feishu_client.send_text(
+        receive_id=chat_id,
+        receive_id_type="chat_id",
+        text=text,
+        trace_id=trace_id,
+        request_uuid=trace_id,
+    )
+
+
+reminder_scheduler = ReminderScheduler(callback=send_reminder, store_path=settings.reminder_store_path)
 feishu_handler = FeishuWebhookHandler(
     settings=settings,
     feishu_client=feishu_client,
@@ -32,6 +46,7 @@ feishu_handler = FeishuWebhookHandler(
     session_manager=session_manager,
     deduplicator=deduplicator,
     task_registry=task_registry,
+    reminder_scheduler=reminder_scheduler,
 )
 
 
@@ -56,7 +71,13 @@ async def feishu_webhook(request: Request) -> JSONResponse:
         return JSONResponse(status_code=status, content={"code": status, "msg": detail})
 
 
+@app.on_event("startup")
+async def startup_event() -> None:
+    await reminder_scheduler.start()
+
+
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    await reminder_scheduler.close()
     await feishu_client.close()
     await codex_client.close()

@@ -26,9 +26,10 @@ def test_parse_text_message_event_success() -> None:
     assert event.chat_id == "oc_123"
     assert event.user_id == "ou_123"
     assert event.text == "hello"
+    assert event.chat_type == "p2p"
 
 
-def test_parse_text_message_event_ignore_non_p2p() -> None:
+def test_parse_text_message_event_ignore_group_without_mention() -> None:
     payload = {
         "header": {
             "event_id": "evt_1",
@@ -47,3 +48,63 @@ def test_parse_text_message_event_ignore_non_p2p() -> None:
     }
 
     assert parse_text_message_event(payload) is None
+
+
+def test_parse_text_message_event_group_mention_strips_bot_token() -> None:
+    payload = {
+        "header": {
+            "event_id": "evt_1",
+            "event_type": "im.message.receive_v1",
+        },
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_123"}},
+            "message": {
+                "message_id": "om_123",
+                "chat_id": "oc_123",
+                "chat_type": "group",
+                "message_type": "text",
+                "content": '{"text": "@_user_1 /help"}',
+                "mentions": [
+                    {
+                        "key": "@_user_1",
+                        "id": {"open_id": "ou_bot"},
+                        "name": "CodexClaw",
+                    }
+                ],
+            },
+        },
+    }
+
+    event = parse_text_message_event(payload, bot_open_id="ou_bot")
+
+    assert event is not None
+    assert event.chat_type == "group"
+    assert event.text == "/help"
+
+
+def test_parse_text_message_event_group_ignores_other_mention_when_bot_id_configured() -> None:
+    payload = {
+        "header": {
+            "event_id": "evt_1",
+            "event_type": "im.message.receive_v1",
+        },
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_123"}},
+            "message": {
+                "message_id": "om_123",
+                "chat_id": "oc_123",
+                "chat_type": "group",
+                "message_type": "text",
+                "content": '{"text": "@_user_1 hello"}',
+                "mentions": [
+                    {
+                        "key": "@_user_1",
+                        "id": {"open_id": "ou_other"},
+                        "name": "Other",
+                    }
+                ],
+            },
+        },
+    }
+
+    assert parse_text_message_event(payload, bot_open_id="ou_bot") is None

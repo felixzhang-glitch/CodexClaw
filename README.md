@@ -8,14 +8,19 @@
 - URL challenge 校验
 - 签名校验（配置 `FEISHU_ENCRYPT_KEY` 后启用）
 - 私聊文本消息处理（`im.message.receive_v1`）
+- 群聊 @ 机器人触发处理（默认要求 @）
 - 消息去重（`message_id`）
 - Codex 统一客户端（超时、重试、错误处理、结构化日志）
 - streaming 增量回传 Feishu
 - 收到消息后先快速回执：消息 reaction（`emoji_type=Typing`）
 - 最终答案默认单条回复（避免分段刷屏）
 - 会话记忆（`user_id + chat_id` 维度，默认 10 轮 FIFO 裁剪）
-- 命令支持：`/new`、`/reset`、`/help`
+- 命令支持：`/new`、`/reset`、`/compact`、`/help`
 - 运行中任务支持：超过阈值自动通知“仍在运行”，并可用 `/stop` 强制终止
+- 主动发送消息能力：普通回复失败时自动按 `chat_id` 兜底发送
+- 定时提醒命令：`/remind 10m 内容`
+- 飞书回复智能分段：优先按段落、代码块和句子边界拆分
+- 自动发送 Codex 生成的本地图片（识别 `file://...png/jpg`，上传为飞书图片消息）
 - 服务控制脚本：`server`（`start|stop|status|help`）
 - 快捷入口：`start`（默认后台，`-f` 前台）
 
@@ -97,7 +102,7 @@ https://<你的公网域名>/webhook/feishu
 ```
 
 2. 订阅事件：`im.message.receive_v1`
-3. 给应用开通机器人发消息权限（读取与回复 IM 文本）
+3. 给应用开通机器人发消息权限（读取、回复、主动发送 IM 文本和图片、上传图片）
 4. 在应用可用范围内允许私聊机器人
 
 说明：
@@ -110,7 +115,9 @@ https://<你的公网域名>/webhook/feishu
 - `/help`：显示帮助
 - `/new`：开启新会话（新 session_id，不继承旧上下文）
 - `/reset`：清空当前会话历史
+- `/compact`：压缩当前会话上下文，保留最近 2 轮；`/compress` 同义
 - `/stop`：终止当前会话中正在运行的任务
+- `/remind 10m 喝水`：10 分钟后主动发送“喝水”；时间单位支持 `s/m/h/d`
 
 ## 配置项
 
@@ -120,6 +127,10 @@ https://<你的公网域名>/webhook/feishu
 - `FEISHU_APP_SECRET`
 - `FEISHU_VERIFICATION_TOKEN`
 - `FEISHU_ENCRYPT_KEY`
+- `FEISHU_BOT_OPEN_ID`（可选；配置后群聊只响应 @ 该 open_id）
+- `FEISHU_GROUP_REQUIRE_MENTION=true`
+- `FEISHU_MAX_RETRIES=2`
+- `FEISHU_RETRY_BACKOFF_SECONDS=0.5`
 - `CODEX_CLI_BIN=codex`
 - `CODEX_WORK_DIR=./runtime/codex-workdir`
 - `CODEX_MODEL`（可空，留空时使用 codex CLI 默认模型）
@@ -131,6 +142,8 @@ https://<你的公网域名>/webhook/feishu
 - `MAX_HISTORY_ROUNDS=10`
 - `STREAMING_ENABLED=true`
 - `TASK_RUNNING_NOTICE_SECONDS=30`
+- `FEISHU_MESSAGE_CHUNK_CHARS=120`
+- `REMINDER_STORE_PATH=./runtime/server/reminders.json`
 - `SERVER_PORT`
 - `LOG_LEVEL`
 

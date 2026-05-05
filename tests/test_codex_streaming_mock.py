@@ -91,3 +91,46 @@ async def test_codex_streaming_mock() -> None:
 
     assert "".join(chunks) == "你好"
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_codex_streaming_includes_generated_image_event() -> None:
+    work_dir = Path("/tmp/codexclaw-test-workdir")
+    work_dir.mkdir(parents=True, exist_ok=True)
+    settings = SimpleNamespace(
+        codex_cli_bin="codex",
+        codex_work_dir=str(work_dir),
+        codex_model="",
+        codex_permission_mode="full",
+        codex_timeout_seconds=30.0,
+        codex_stream_read_limit_bytes=262144,
+        codex_max_retries=1,
+        codex_retry_backoff_seconds=0.01,
+        codex_circuit_breaker_threshold=5,
+        codex_circuit_breaker_cooldown_seconds=30,
+    )
+    client = CodexClient(settings=settings)
+
+    async def fake_spawn(command: list[str]) -> FakeProcess:
+        events = [
+            json.dumps({"type": "turn.started"}) + "\n",
+            json.dumps({"type": "image.generated", "path": "file:///tmp/generated.png"}) + "\n",
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"id": "item_1", "type": "agent_message", "text": "已生成"},
+                }
+            )
+            + "\n",
+        ]
+        return FakeProcess(stdout_lines=events, return_code=0)
+
+    client._spawn_process = fake_spawn  # type: ignore[assignment]
+
+    chunks: list[str] = []
+    async for piece in client.chat_stream(messages=[{"role": "user", "content": "draw"}], trace_id="trace-img"):
+        chunks.append(piece)
+
+    assert "已生成" in "".join(chunks)
+    assert "file:///tmp/generated.png" in "".join(chunks)
+    await client.close()

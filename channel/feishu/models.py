@@ -12,6 +12,7 @@ class FeishuTextMessageEvent:
     chat_id: str
     user_id: str
     text: str
+    chat_type: str
 
 
 def is_url_verification(payload: dict[str, Any]) -> bool:
@@ -29,7 +30,11 @@ def extract_token(payload: dict[str, Any]) -> str:
     return ""
 
 
-def parse_text_message_event(payload: dict[str, Any]) -> FeishuTextMessageEvent | None:
+def parse_text_message_event(
+    payload: dict[str, Any],
+    bot_open_id: str = "",
+    group_require_mention: bool = True,
+) -> FeishuTextMessageEvent | None:
     header = payload.get("header") or {}
     if header.get("event_type") != "im.message.receive_v1":
         return None
@@ -45,7 +50,8 @@ def parse_text_message_event(payload: dict[str, Any]) -> FeishuTextMessageEvent 
     if message.get("message_type") != "text":
         return None
 
-    if message.get("chat_type") != "p2p":
+    chat_type = str(message.get("chat_type", "")).strip()
+    if chat_type not in {"p2p", "group", "chat"}:
         return None
 
     content_raw = message.get("content")
@@ -60,6 +66,14 @@ def parse_text_message_event(payload: dict[str, Any]) -> FeishuTextMessageEvent 
     text = str(content.get("text", "")).strip()
     if not text:
         return None
+
+    if chat_type != "p2p":
+        mention_keys = _matching_mention_keys(message=message, bot_open_id=bot_open_id)
+        if group_require_mention and not mention_keys:
+            return None
+        text = _strip_mention_keys(text=text, mention_keys=mention_keys)
+        if not text:
+            return None
 
     sender = event.get("sender") or {}
     sender_id = sender.get("sender_id") or {}
@@ -80,4 +94,42 @@ def parse_text_message_event(payload: dict[str, Any]) -> FeishuTextMessageEvent 
         chat_id=chat_id,
         user_id=str(user_id),
         text=text,
+        chat_type=chat_type,
     )
+
+
+def _matching_mention_keys(message: dict[str, Any], bot_open_id: str = "") -> list[str]:
+    mentions = message.get("mentions")
+    if not isinstance(mentions, list):
+        return []
+
+    expected_open_id = bot_open_id.strip()
+    keys: list[str] = []
+    for mention in mentions:
+        if not isinstance(mention, dict):
+            continue
+        key = str(mention.get("key", "")).strip()
+        if not key:
+            continue
+        if not expected_open_id:
+            keys.append(key)
+            continue
+
+        mention_id = mention.get("id")
+        if not isinstance(mention_id, dict):
+            continue
+        mention_ids = {
+            str(mention_id.get("open_id", "")).strip(),
+            str(mention_id.get("user_id", "")).strip(),
+            str(mention_id.get("union_id", "")).strip(),
+        }
+        if expected_open_id in mention_ids:
+            keys.append(key)
+    return keys
+
+
+def _strip_mention_keys(text: str, mention_keys: list[str]) -> str:
+    cleaned = text
+    for key in mention_keys:
+        cleaned = cleaned.replace(key, " ")
+    return " ".join(cleaned.strip().split())

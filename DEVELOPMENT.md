@@ -15,10 +15,16 @@ CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
 
 - 单实例服务（FastAPI + Uvicorn）
 - Feishu 文本消息闭环
+- 群聊 @ 机器人触发处理
 - 会话记忆（默认 10 轮 FIFO）
-- `/help`、`/new`、`/reset`、`/stop`
+- `/help`、`/new`、`/reset`、`/compact`、`/stop`
+- `/remind <时间> <内容>` 定时提醒，时间单位支持 `s/m/h/d`
 - 快速回执（reaction: `emoji_type=Typing`）
 - 长任务通知（默认 30 秒后提示“仍在运行中”）
+- 普通 reply 失败后，按 `chat_id` 主动发送兜底
+- 飞书 OpenAPI transient failure 重试
+- 飞书长文本智能分段，尽量保留段落和代码块完整性
+- 自动识别 Codex 输出中的本地图片路径并上传为飞书图片消息
 - 同一会话同一时刻只允许一个运行中任务
 - 最终答案默认单条回复（超长时自动回退分段）
 - 结构化日志
@@ -47,6 +53,7 @@ core/session/
   manager.py         # 会话存储与 FIFO 裁剪
   deduplicator.py    # message_id 去重
   task_registry.py   # 运行中任务注册与取消
+  reminder_scheduler.py # 单实例内存定时提醒
 
 tests/               # 单元测试
 
@@ -100,6 +107,10 @@ DEVELOPMENT.md       # 本文档
 - `FEISHU_VERIFICATION_TOKEN`（可选，配置后会校验）
 - `FEISHU_ENCRYPT_KEY`（建议配置，用于签名校验/加密场景）
 - `FEISHU_API_BASE`（默认 `https://open.feishu.cn`）
+- `FEISHU_BOT_OPEN_ID`（可选，配置后群聊只响应 @ 该 open_id）
+- `FEISHU_GROUP_REQUIRE_MENTION`（默认 `true`）
+- `FEISHU_MAX_RETRIES`（默认 `2`）
+- `FEISHU_RETRY_BACKOFF_SECONDS`（默认 `0.5`）
 
 ### 4.2 Codex CLI
 
@@ -124,6 +135,8 @@ DEVELOPMENT.md       # 本文档
 - `MAX_HISTORY_ROUNDS`：会话记忆轮数，默认 `10`
 - `STREAMING_ENABLED`：是否启用流式获取（当前即使流式获取，也会汇总后单条回发）
 - `TASK_RUNNING_NOTICE_SECONDS`：长任务通知阈值，默认 `30`
+- `FEISHU_MESSAGE_CHUNK_CHARS`：Feishu 文本拆分长度，默认 `120`
+- `REMINDER_STORE_PATH`：待触发提醒持久化文件，默认 `./runtime/server/reminders.json`
 - `SERVER_HOST`
 - `SERVER_PORT`
 - `LOG_LEVEL`
@@ -141,7 +154,7 @@ DEVELOPMENT.md       # 本文档
 1. 解析 JSON 请求体
 2. 校验签名（如果带签名头）
 3. 处理 challenge（`url_verification`）
-4. 解析事件，仅接受 `im.message.receive_v1` + `text` + `p2p`
+4. 解析事件，接受私聊文本；群聊默认要求 @ 机器人后触发
 5. 异步处理具体消息（立即返回 `{"code": 0}`）
 
 ### 5.2 消息处理（_handle_text_event）
@@ -151,13 +164,19 @@ DEVELOPMENT.md       # 本文档
 3. 特判 `/stop`：终止当前会话中的运行任务
 4. 发送 quick ack reaction（`Typing`）
 5. 若当前会话已有运行中任务，直接回复“已有任务在运行中”
-6. 命令分支：`/help` `/new` `/reset`
+6. 命令分支：`/help` `/new` `/reset` `/compact`
 7. 读取会话历史，拼接当前问题
 8. 在 `task_registry` 中登记运行任务并启动长任务通知定时器
 9. 调用 Codex CLI
 10. 回发答案（单条）
 11. 写回会话历史
 12. 清理运行任务登记与定时器
+
+`/remind` 命令不进入 Codex 执行链路，会登记到单实例调度器并持久化到 `REMINDER_STORE_PATH`，到期后通过 `im/v1/messages?receive_id_type=chat_id` 主动发送。
+
+`/compact` 会把较早的会话轮次压缩成一条摘要轮次，并保留最近 2 轮原文，适合长会话里降低后续 prompt 体积。
+
+当 Codex 输出里包含 `file://...png/jpg/gif/webp` 或本地绝对图片路径时，handler 会先清理文本里的本地路径，再调用 `POST /open-apis/im/v1/images` 上传图片并用 `msg_type=image` 回复或主动发送到当前 chat。
 
 取消时：回复 `当前任务已终止。`
 
@@ -225,6 +244,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 - 超出 `MAX_HISTORY_ROUNDS` 时，按 FIFO 删除最早轮次
 - `/new`：生成新会话 ID，清空上下文
 - `/reset`：清空当前会话轮次
+- `/compact`：压缩较早轮次为一条摘要，保留最近 2 轮原始上下文
 
 补充：
 
@@ -239,6 +259,8 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 - 获取并缓存 `tenant_access_token`
 - 回复文本消息：`POST /im/v1/messages/{message_id}/reply`
+- 上传图片：`POST /im/v1/images`
+- 回复/发送图片消息：`msg_type=image` + `{"image_key":"..."}`
 - 快速回执 reaction：`POST /im/v1/messages/{message_id}/reactions`
   - 请求体：`{"reaction_type":{"emoji_type":"Typing"}}`
 

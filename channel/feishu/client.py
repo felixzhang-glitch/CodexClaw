@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
+from pathlib import Path
 import time
 from typing import Any
 
@@ -38,7 +40,6 @@ class FeishuClient:
         if not text:
             return
 
-        token = await self._get_tenant_access_token(trace_id=trace_id)
         url = self._settings.feishu_reply_url_template.format(message_id=message_id)
 
         payload: dict[str, Any] = {
@@ -48,16 +49,12 @@ class FeishuClient:
         if request_uuid:
             payload["uuid"] = request_uuid
 
-        response = await self._client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
+        response, data = await self._post_authenticated_json(
+            url=url,
+            payload=payload,
+            trace_id=trace_id,
+            event="feishu.reply",
         )
-
-        data = self._parse_response(response)
         if data.get("code") != 0:
             logger.error(
                 "feishu reply failed",
@@ -79,29 +76,213 @@ class FeishuClient:
             },
         )
 
+    async def send_text(
+        self,
+        receive_id: str,
+        text: str,
+        trace_id: str,
+        receive_id_type: str = "chat_id",
+        request_uuid: str | None = None,
+    ) -> str:
+        if not text:
+            return ""
+
+        url = self._settings.feishu_send_message_url
+
+        params = {"receive_id_type": receive_id_type}
+        payload: dict[str, Any] = {
+            "receive_id": receive_id,
+            "msg_type": "text",
+            "content": json.dumps({"text": text}, ensure_ascii=False),
+        }
+        if request_uuid:
+            payload["uuid"] = request_uuid
+
+        response, data = await self._post_authenticated_json(
+            url=url,
+            payload=payload,
+            trace_id=trace_id,
+            event="feishu.send",
+            params=params,
+        )
+        if data.get("code") != 0:
+            logger.error(
+                "feishu send message failed",
+                extra={
+                    "trace_id": trace_id,
+                    "event": "feishu.send",
+                    "status_code": response.status_code,
+                    "error_code": data.get("code"),
+                },
+            )
+            raise FeishuClientError(f"feishu send message failed: {data}")
+
+        logger.info(
+            "feishu message sent",
+            extra={
+                "trace_id": trace_id,
+                "event": "feishu.send",
+                "status_code": response.status_code,
+            },
+        )
+
+        message = data.get("data")
+        if isinstance(message, dict):
+            message_id = message.get("message_id")
+            if isinstance(message_id, str):
+                return message_id
+        return ""
+
+    async def reply_image(
+        self,
+        message_id: str,
+        image_key: str,
+        trace_id: str,
+        request_uuid: str | None = None,
+    ) -> None:
+        if not image_key:
+            return
+
+        url = self._settings.feishu_reply_url_template.format(message_id=message_id)
+        payload: dict[str, Any] = {
+            "msg_type": "image",
+            "content": json.dumps({"image_key": image_key}, ensure_ascii=False),
+        }
+        if request_uuid:
+            payload["uuid"] = request_uuid
+
+        response, data = await self._post_authenticated_json(
+            url=url,
+            payload=payload,
+            trace_id=trace_id,
+            event="feishu.reply_image",
+        )
+        if data.get("code") != 0:
+            logger.error(
+                "feishu image reply failed",
+                extra={
+                    "trace_id": trace_id,
+                    "event": "feishu.reply_image",
+                    "status_code": response.status_code,
+                    "error_code": data.get("code"),
+                },
+            )
+            raise FeishuClientError(f"feishu image reply failed: {data}")
+
+        logger.info(
+            "feishu image reply sent",
+            extra={"trace_id": trace_id, "event": "feishu.reply_image", "status_code": response.status_code},
+        )
+
+    async def send_image(
+        self,
+        receive_id: str,
+        image_key: str,
+        trace_id: str,
+        receive_id_type: str = "chat_id",
+        request_uuid: str | None = None,
+    ) -> str:
+        if not image_key:
+            return ""
+
+        params = {"receive_id_type": receive_id_type}
+        payload: dict[str, Any] = {
+            "receive_id": receive_id,
+            "msg_type": "image",
+            "content": json.dumps({"image_key": image_key}, ensure_ascii=False),
+        }
+        if request_uuid:
+            payload["uuid"] = request_uuid
+
+        response, data = await self._post_authenticated_json(
+            url=self._settings.feishu_send_message_url,
+            payload=payload,
+            trace_id=trace_id,
+            event="feishu.send_image",
+            params=params,
+        )
+        if data.get("code") != 0:
+            logger.error(
+                "feishu image send failed",
+                extra={
+                    "trace_id": trace_id,
+                    "event": "feishu.send_image",
+                    "status_code": response.status_code,
+                    "error_code": data.get("code"),
+                },
+            )
+            raise FeishuClientError(f"feishu image send failed: {data}")
+
+        logger.info(
+            "feishu image sent",
+            extra={"trace_id": trace_id, "event": "feishu.send_image", "status_code": response.status_code},
+        )
+
+        message = data.get("data")
+        if isinstance(message, dict):
+            message_id = message.get("message_id")
+            if isinstance(message_id, str):
+                return message_id
+        return ""
+
+    async def upload_image(self, image_path: str, trace_id: str) -> str:
+        path = Path(image_path).expanduser()
+        if not path.is_file():
+            raise FeishuClientError(f"image file not found: {image_path}")
+
+        content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        with path.open("rb") as image_file:
+            response, data = await self._post_authenticated_multipart(
+                url=self._settings.feishu_image_upload_url,
+                data={"image_type": "message"},
+                files={"image": (path.name, image_file, content_type)},
+                trace_id=trace_id,
+                event="feishu.upload_image",
+            )
+
+        if data.get("code") != 0:
+            logger.error(
+                "feishu image upload failed",
+                extra={
+                    "trace_id": trace_id,
+                    "event": "feishu.upload_image",
+                    "status_code": response.status_code,
+                    "error_code": data.get("code"),
+                },
+            )
+            raise FeishuClientError(f"feishu image upload failed: {data}")
+
+        payload = data.get("data")
+        if not isinstance(payload, dict):
+            raise FeishuClientError("missing image upload data")
+        image_key = payload.get("image_key")
+        if not isinstance(image_key, str) or not image_key:
+            raise FeishuClientError("missing image_key in upload response")
+
+        logger.info(
+            "feishu image uploaded",
+            extra={"trace_id": trace_id, "event": "feishu.upload_image", "status_code": response.status_code},
+        )
+        return image_key
+
     async def create_reaction(
         self,
         message_id: str,
         emoji_type: str,
         trace_id: str,
     ) -> None:
-        token = await self._get_tenant_access_token(trace_id=trace_id)
         url = self._settings.feishu_reaction_url_template.format(message_id=message_id)
 
-        response = await self._client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={
+        response, data = await self._post_authenticated_json(
+            url=url,
+            trace_id=trace_id,
+            event="feishu.reaction",
+            payload={
                 "reaction_type": {
                     "emoji_type": emoji_type,
                 }
             },
         )
-
-        data = self._parse_response(response)
         if data.get("code") != 0:
             logger.error(
                 "feishu reaction failed",
@@ -136,15 +317,15 @@ class FeishuClient:
             if not self._settings.feishu_app_id or not self._settings.feishu_app_secret:
                 raise FeishuClientError("FEISHU_APP_ID / FEISHU_APP_SECRET is not configured")
 
-            response = await self._client.post(
+            response, data = await self._post_json_with_retries(
                 self._settings.feishu_tenant_token_url,
-                headers={"Content-Type": "application/json"},
-                json={
+                payload={
                     "app_id": self._settings.feishu_app_id,
                     "app_secret": self._settings.feishu_app_secret,
                 },
+                trace_id=trace_id,
+                event="feishu.token",
             )
-            data = self._parse_response(response)
             if data.get("code") != 0:
                 logger.error(
                     "failed to fetch feishu tenant token",
@@ -171,6 +352,200 @@ class FeishuClient:
             )
 
             return tenant_token
+
+    async def _post_authenticated_json(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        trace_id: str,
+        event: str,
+        params: dict[str, str] | None = None,
+    ) -> tuple[httpx.Response, dict[str, Any]]:
+        attempts = self._retry_attempts()
+        last_error: Exception | None = None
+
+        for attempt in range(attempts + 1):
+            token = await self._get_tenant_access_token(trace_id=trace_id)
+            try:
+                response = await self._client.post(
+                    url,
+                    params=params,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                data = self._parse_response(response)
+            except (httpx.RequestError, FeishuClientError) as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    raise FeishuClientError(f"feishu request failed: {exc}") from exc
+                await self._sleep_before_retry(attempt)
+                continue
+
+            if data.get("code") == 0:
+                return response, data
+
+            if response.status_code == 401:
+                self._clear_tenant_access_token()
+                if attempt < attempts:
+                    logger.warning(
+                        "retrying feishu request after token rejection",
+                        extra={
+                            "trace_id": trace_id,
+                            "event": event,
+                            "status_code": response.status_code,
+                            "error_code": data.get("code"),
+                        },
+                    )
+                    await self._sleep_before_retry(attempt)
+                    continue
+
+            if attempt >= attempts or not self._is_retryable_response(response=response, data=data):
+                return response, data
+
+            logger.warning(
+                "retrying feishu request",
+                extra={
+                    "trace_id": trace_id,
+                    "event": event,
+                    "status_code": response.status_code,
+                    "error_code": data.get("code"),
+                },
+            )
+            await self._sleep_before_retry(attempt)
+
+        raise FeishuClientError(f"feishu request failed: {last_error}")
+
+    async def _post_authenticated_multipart(
+        self,
+        url: str,
+        data: dict[str, str],
+        files: dict[str, Any],
+        trace_id: str,
+        event: str,
+    ) -> tuple[httpx.Response, dict[str, Any]]:
+        attempts = self._retry_attempts()
+        last_error: Exception | None = None
+
+        for attempt in range(attempts + 1):
+            token = await self._get_tenant_access_token(trace_id=trace_id)
+            try:
+                self._rewind_files(files)
+                response = await self._client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    data=data,
+                    files=files,
+                )
+                data_json = self._parse_response(response)
+            except (httpx.RequestError, FeishuClientError) as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    raise FeishuClientError(f"feishu request failed: {exc}") from exc
+                await self._sleep_before_retry(attempt)
+                continue
+
+            if data_json.get("code") == 0:
+                return response, data_json
+
+            if response.status_code == 401:
+                self._clear_tenant_access_token()
+                if attempt < attempts:
+                    await self._sleep_before_retry(attempt)
+                    continue
+
+            if attempt >= attempts or not self._is_retryable_response(response=response, data=data_json):
+                return response, data_json
+
+            logger.warning(
+                "retrying feishu multipart request",
+                extra={
+                    "trace_id": trace_id,
+                    "event": event,
+                    "status_code": response.status_code,
+                    "error_code": data_json.get("code"),
+                },
+            )
+            await self._sleep_before_retry(attempt)
+
+        raise FeishuClientError(f"feishu request failed: {last_error}")
+
+    async def _post_json_with_retries(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        trace_id: str,
+        event: str,
+    ) -> tuple[httpx.Response, dict[str, Any]]:
+        attempts = self._retry_attempts()
+        last_error: Exception | None = None
+
+        for attempt in range(attempts + 1):
+            try:
+                response = await self._client.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                )
+                data = self._parse_response(response)
+            except (httpx.RequestError, FeishuClientError) as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    raise FeishuClientError(f"feishu request failed: {exc}") from exc
+                await self._sleep_before_retry(attempt)
+                continue
+
+            if data.get("code") == 0:
+                return response, data
+            if attempt >= attempts or not self._is_retryable_response(response=response, data=data):
+                return response, data
+
+            logger.warning(
+                "retrying feishu request",
+                extra={
+                    "trace_id": trace_id,
+                    "event": event,
+                    "status_code": response.status_code,
+                    "error_code": data.get("code"),
+                },
+            )
+            await self._sleep_before_retry(attempt)
+
+        raise FeishuClientError(f"feishu request failed: {last_error}")
+
+    def _clear_tenant_access_token(self) -> None:
+        self._tenant_access_token = ""
+        self._token_expire_at = 0.0
+
+    def _retry_attempts(self) -> int:
+        return max(0, int(getattr(self._settings, "feishu_max_retries", 2) or 0))
+
+    async def _sleep_before_retry(self, attempt: int) -> None:
+        backoff = float(getattr(self._settings, "feishu_retry_backoff_seconds", 0.5) or 0.0)
+        if backoff <= 0:
+            return
+        await asyncio.sleep(backoff * (2**attempt))
+
+    @staticmethod
+    def _is_retryable_response(response: httpx.Response, data: dict[str, Any]) -> bool:
+        if response.status_code == 429 or response.status_code >= 500:
+            return True
+
+        code = data.get("code")
+        return isinstance(code, int) and code < 0
+
+    @staticmethod
+    def _rewind_files(files: dict[str, Any]) -> None:
+        for value in files.values():
+            file_obj = None
+            if isinstance(value, tuple) and len(value) >= 2:
+                file_obj = value[1]
+            elif hasattr(value, "seek"):
+                file_obj = value
+            if file_obj is not None and hasattr(file_obj, "seek"):
+                file_obj.seek(0)
 
     @staticmethod
     def _parse_response(response: httpx.Response) -> dict[str, Any]:

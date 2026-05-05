@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -206,6 +207,7 @@ class CodexClient:
 
         completed_message = ""
         fallback_parts: list[str] = []
+        media_refs: list[str] = []
         error_messages: list[str] = []
 
         try:
@@ -223,6 +225,8 @@ class CodexClient:
                 if event is None:
                     fallback_parts.append(text)
                     continue
+
+                media_refs.extend(self._extract_file_uri_refs(event, known=media_refs))
 
                 error_message = self._extract_error_message(event)
                 if error_message:
@@ -250,10 +254,10 @@ class CodexClient:
             )
 
         if completed_message:
-            return completed_message
+            return self._join_answer_parts(completed_message, media_refs)
 
         fallback = "\n".join(fallback_parts).strip()
-        return fallback
+        return self._join_answer_parts(fallback, media_refs)
 
     async def _run_stream_once(self, prompt: str, trace_id: str) -> AsyncIterator[str]:
         command = self._build_command(prompt)
@@ -264,6 +268,7 @@ class CodexClient:
         saw_incremental = False
         completed_message = ""
         fallback_parts: list[str] = []
+        media_refs: list[str] = []
         error_messages: list[str] = []
 
         try:
@@ -281,6 +286,8 @@ class CodexClient:
                 if event is None:
                     fallback_parts.append(text)
                     continue
+
+                media_refs.extend(self._extract_file_uri_refs(event, known=media_refs))
 
                 error_message = self._extract_error_message(event)
                 if error_message:
@@ -322,6 +329,10 @@ class CodexClient:
             if fallback:
                 for chunk in self._split_chunks(fallback):
                     yield chunk
+
+        if media_refs:
+            for chunk in self._split_chunks("\n".join(media_refs)):
+                yield chunk
 
     def _build_command(self, prompt: str) -> list[str]:
         command = [
@@ -473,6 +484,37 @@ class CodexClient:
                     return message.strip()
 
         return ""
+
+    @classmethod
+    def _extract_file_uri_refs(cls, event: dict[str, Any], known: list[str]) -> list[str]:
+        found: list[str] = []
+        known_set = set(known)
+        for value in cls._walk_values(event):
+            if not isinstance(value, str):
+                continue
+            for ref in re.findall(r"file://[^\s)>\]\"']+\.(?:png|jpe?g|gif|webp|bmp)", value, flags=re.IGNORECASE):
+                if ref not in known_set and ref not in found:
+                    found.append(ref)
+        return found
+
+    @classmethod
+    def _walk_values(cls, value: Any) -> list[Any]:
+        if isinstance(value, dict):
+            values: list[Any] = []
+            for child in value.values():
+                values.extend(cls._walk_values(child))
+            return values
+        if isinstance(value, list):
+            values = []
+            for child in value:
+                values.extend(cls._walk_values(child))
+            return values
+        return [value]
+
+    @staticmethod
+    def _join_answer_parts(text: str, media_refs: list[str]) -> str:
+        parts = [part for part in [text.strip(), "\n".join(media_refs).strip()] if part]
+        return "\n".join(parts)
 
     def _build_prompt(self, messages: list[dict[str, str]]) -> str:
         prompt_lines = [
