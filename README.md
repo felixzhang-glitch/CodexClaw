@@ -1,6 +1,6 @@
 # CodexClaw (Feishu + Codex MVP)
 
-一个单实例可运行服务：接收 Feishu 私聊文本消息，调用本机 `codex exec`（`full` 权限）处理后回传 Feishu，支持 streaming 分段回复。
+一个单实例可运行服务：接收 Feishu 私聊文本消息，显式触发后调用本机 `codex exec`（默认 `workspace-write` 权限）处理并回传 Feishu，支持 streaming 分段回复。
 
 ## 功能覆盖
 
@@ -9,6 +9,8 @@
 - 签名校验（配置 `FEISHU_ENCRYPT_KEY` 后启用）
 - 私聊文本消息处理（`im.message.receive_v1`）
 - 群聊 @ 机器人触发处理（默认要求 @）
+- Codex 显式触发：默认仅处理 `/codex ...` 或“联动 Codex ...”
+- 可选用户白名单：配置 `CODEX_ALLOWED_USER_IDS` 后，仅允许指定 Feishu 用户触发 Codex
 - 消息去重（`message_id`）
 - Codex 统一客户端（超时、重试、错误处理、结构化日志）
 - streaming 增量回传 Feishu
@@ -68,7 +70,7 @@ start.sh
 - `FEISHU_APP_ID`（形如 `cli_xxx`）
 - `FEISHU_APP_SECRET`
 
-脚本会自动：创建虚拟环境、安装依赖、写入 `.env`、创建独立 Codex 工作目录并启动服务。
+脚本会自动：创建虚拟环境、安装依赖、写入 `.env`、配置 Codex 工作目录并启动服务。
 
 3. 常用服务命令：
 
@@ -118,6 +120,7 @@ https://<你的公网域名>/webhook/feishu
 - `/compact`：压缩当前会话上下文，保留最近 2 轮；`/compress` 同义
 - `/stop`：终止当前会话中正在运行的任务
 - `/remind 10m 喝水`：10 分钟后主动发送“喝水”；时间单位支持 `s/m/h/d`
+- `/codex <任务>`：显式触发 Codex 执行任务
 
 ## 配置项
 
@@ -131,14 +134,17 @@ https://<你的公网域名>/webhook/feishu
 - `FEISHU_GROUP_REQUIRE_MENTION=true`
 - `FEISHU_MAX_RETRIES=2`
 - `FEISHU_RETRY_BACKOFF_SECONDS=0.5`
-- `CODEX_CLI_BIN=codex`
-- `CODEX_WORK_DIR=./runtime/codex-workdir`
+- `CODEX_CLI_BIN=/Applications/Codex.app/Contents/Resources/codex`
+- `CODEX_WORK_DIR=/Users/cesclaw/Desktop/All of CDOU`
 - `CODEX_MODEL`（可空，留空时使用 codex CLI 默认模型）
-- `CODEX_PERMISSION_MODE=full`
+- `CODEX_PERMISSION_MODE=workspace-write`
 - `CODEX_TIMEOUT_SECONDS=30`
 - `CODEX_STREAM_READ_LIMIT_BYTES=262144`
 - `CODEX_CIRCUIT_BREAKER_THRESHOLD=5`
 - `CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS=30`
+- `CODEX_ALLOWED_USER_IDS`（可空；逗号分隔 Feishu 用户 open_id 白名单）
+- `CODEX_TRIGGER_REQUIRED=true`
+- `CODEX_TRIGGER_PREFIXES=/codex,联动 Codex,联动codex,交给 Codex,让 Codex 处理`
 - `MAX_HISTORY_ROUNDS=10`
 - `STREAMING_ENABLED=true`
 - `TASK_RUNNING_NOTICE_SECONDS=30`

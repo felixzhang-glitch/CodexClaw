@@ -8,7 +8,7 @@ CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
 
 1. 接收 Feishu 事件回调。
 2. 解析/校验消息并维护会话上下文。
-3. 调用本机 `codex exec`（默认 `full` 权限）生成答案。
+3. 在显式触发后调用本机 `codex exec`（默认 `workspace-write` 权限）生成答案。
 4. 将结果回传 Feishu。
 
 当前实现特性：
@@ -16,6 +16,8 @@ CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
 - 单实例服务（FastAPI + Uvicorn）
 - Feishu 文本消息闭环
 - 群聊 @ 机器人触发处理
+- Codex 显式触发：默认仅处理 `/codex ...` 或“联动 Codex ...”
+- 可选用户白名单：配置 `CODEX_ALLOWED_USER_IDS` 后，仅允许指定 Feishu 用户触发 Codex
 - 会话记忆（默认 10 轮 FIFO）
 - `/help`、`/new`、`/reset`、`/compact`、`/stop`
 - `/remind <时间> <内容>` 定时提醒，时间单位支持 `s/m/h/d`
@@ -81,17 +83,17 @@ DEVELOPMENT.md       # 本文档
 
 - PID 文件：`runtime/server/codexclaw.pid`
 - 日志文件：`runtime/server/codexclaw.log`
-- Codex 工作目录：`runtime/codex-workdir`（可由 `CODEX_WORK_DIR` 覆盖）
+- Codex 工作目录：默认 `/Users/cesclaw/Desktop/All of CDOU`（可由 `CODEX_WORK_DIR` 覆盖）
 
 ### 3.3 首次启动流程
 
 `server` 脚本会自动：
 
-1. 检查 `python3` 和 `codex`。
+1. 检查 Python 3.10+ 和 Codex CLI。
 2. 自动创建 `.venv` 并安装依赖。
 3. 初始化 `.env`（若不存在则由 `.env.example` 复制）。
 4. 引导填写 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。
-5. 确保 `CODEX_PERMISSION_MODE=full`。
+5. 确保 `CODEX_PERMISSION_MODE=workspace-write`。
 6. 启动 Uvicorn。
 
 ---
@@ -114,9 +116,9 @@ DEVELOPMENT.md       # 本文档
 
 ### 4.2 Codex CLI
 
-- `CODEX_CLI_BIN`（默认 `codex`）
-- `CODEX_WORK_DIR`（默认 `./runtime/codex-workdir`）
-- `CODEX_PERMISSION_MODE`（默认 `full`）
+- `CODEX_CLI_BIN`（默认 `/Applications/Codex.app/Contents/Resources/codex`）
+- `CODEX_WORK_DIR`（默认 `/Users/cesclaw/Desktop/All of CDOU`）
+- `CODEX_PERMISSION_MODE`（默认 `workspace-write`）
 - `CODEX_MODEL`（可空；空时使用本机 codex 默认模型）
 - `CODEX_TIMEOUT_SECONDS`：单次读取 stdout 新行的超时时间，不是总任务时长上限
 - `CODEX_STREAM_READ_LIMIT_BYTES`：subprocess stream 读取上限，避免超长单行 JSON 触发默认 64KB 限制
@@ -124,6 +126,9 @@ DEVELOPMENT.md       # 本文档
 - `CODEX_RETRY_BACKOFF_SECONDS`
 - `CODEX_CIRCUIT_BREAKER_THRESHOLD`
 - `CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS`
+- `CODEX_ALLOWED_USER_IDS`（可空；逗号分隔 Feishu 用户 open_id 白名单）
+- `CODEX_TRIGGER_REQUIRED`（默认 `true`）
+- `CODEX_TRIGGER_PREFIXES`（默认 `/codex,联动 Codex,联动codex,交给 Codex,让 Codex 处理`）
 
 说明：
 

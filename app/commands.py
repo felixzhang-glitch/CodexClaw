@@ -12,7 +12,8 @@ HELP_TEXT = (
     "/reset - 清空当前会话上下文\n"
     "/compact - 压缩当前会话上下文（保留最近 2 轮）\n"
     "/stop - 终止当前正在运行的任务\n"
-    "/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）"
+    "/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）\n"
+    "/codex <任务> - 显式触发 Codex 执行任务"
 )
 
 

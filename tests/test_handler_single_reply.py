@@ -85,11 +85,14 @@ class FakeFeishuClient:
 class FakeCodexClient:
     def __init__(self) -> None:
         self.cancelled = False
+        self.messages: list[list[dict[str, str]]] = []
 
     async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+        self.messages.append(messages)
         return "你好"
 
     async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+        self.messages.append(messages)
         for piece in ["你", "好"]:
             yield piece
 
@@ -181,6 +184,112 @@ async def test_handle_text_event_quick_ack_and_single_final_reply() -> None:
     assert feishu_client.reaction_calls == ["Typing"]
     assert len(feishu_client.reply_calls) == 1
     assert feishu_client.reply_calls[0][0] == "你好"
+
+
+@pytest.mark.asyncio
+async def test_handle_text_event_requires_codex_trigger_when_enabled() -> None:
+    settings = SimpleNamespace(
+        streaming_enabled=True,
+        task_running_notice_seconds=30.0,
+        feishu_encrypt_key="",
+        feishu_verification_token="",
+        codex_trigger_required=True,
+        codex_trigger_prefixes="/codex,联动 Codex",
+        codex_allowed_user_ids="",
+    )
+    feishu_client = FakeFeishuClient()
+    codex_client = FakeCodexClient()
+    handler = FeishuWebhookHandler(
+        settings=settings,
+        feishu_client=feishu_client,
+        codex_client=codex_client,
+        session_manager=SessionManager(max_history_rounds=10),
+        deduplicator=MessageDeduplicator(ttl_seconds=3600),
+        task_registry=ActiveTaskRegistry(),
+    )
+
+    event = SimpleNamespace(
+        message_id="om_test_trigger_required",
+        user_id="ou_test_1",
+        chat_id="oc_test_1",
+        text="你好",
+    )
+
+    await handler._handle_text_event(event=event, trace_id="trace-trigger-required")
+
+    assert feishu_client.reply_calls == [("未触发 Codex。请使用 /codex <任务>，或明确说“联动 Codex ...”。", "om_test_trigger_required-not-triggered")]
+    assert codex_client.messages == []
+
+
+@pytest.mark.asyncio
+async def test_handle_text_event_strips_codex_trigger() -> None:
+    settings = SimpleNamespace(
+        streaming_enabled=True,
+        task_running_notice_seconds=30.0,
+        feishu_encrypt_key="",
+        feishu_verification_token="",
+        codex_trigger_required=True,
+        codex_trigger_prefixes="/codex,联动 Codex",
+        codex_allowed_user_ids="",
+    )
+    feishu_client = FakeFeishuClient()
+    codex_client = FakeCodexClient()
+    handler = FeishuWebhookHandler(
+        settings=settings,
+        feishu_client=feishu_client,
+        codex_client=codex_client,
+        session_manager=SessionManager(max_history_rounds=10),
+        deduplicator=MessageDeduplicator(ttl_seconds=3600),
+        task_registry=ActiveTaskRegistry(),
+    )
+
+    event = SimpleNamespace(
+        message_id="om_test_trigger_strip",
+        user_id="ou_test_1",
+        chat_id="oc_test_1",
+        text="/codex 检查 inbox",
+    )
+
+    await handler._handle_text_event(event=event, trace_id="trace-trigger-strip")
+
+    assert feishu_client.reply_calls[0][0] == "你好"
+    assert codex_client.messages[-1][-1]["content"] == "检查 inbox"
+
+
+@pytest.mark.asyncio
+async def test_handle_text_event_rejects_unauthorized_user() -> None:
+    settings = SimpleNamespace(
+        streaming_enabled=True,
+        task_running_notice_seconds=30.0,
+        feishu_encrypt_key="",
+        feishu_verification_token="",
+        codex_trigger_required=True,
+        codex_trigger_prefixes="/codex",
+        codex_allowed_user_ids="ou_allowed",
+    )
+    feishu_client = FakeFeishuClient()
+    codex_client = FakeCodexClient()
+    handler = FeishuWebhookHandler(
+        settings=settings,
+        feishu_client=feishu_client,
+        codex_client=codex_client,
+        session_manager=SessionManager(max_history_rounds=10),
+        deduplicator=MessageDeduplicator(ttl_seconds=3600),
+        task_registry=ActiveTaskRegistry(),
+    )
+
+    event = SimpleNamespace(
+        message_id="om_test_unauthorized",
+        user_id="ou_other",
+        chat_id="oc_test_1",
+        text="/codex 检查 inbox",
+    )
+
+    await handler._handle_text_event(event=event, trace_id="trace-unauthorized")
+
+    assert feishu_client.reply_calls == []
+    assert feishu_client.reaction_calls == []
+    assert codex_client.messages == []
 
 
 class BlockingCodexClient:
