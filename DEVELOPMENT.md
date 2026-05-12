@@ -111,6 +111,7 @@ DEVELOPMENT.md       # 本文档
 - `FEISHU_API_BASE`（默认 `https://open.feishu.cn`）
 - `FEISHU_BOT_OPEN_ID`（可选，配置后群聊只响应 @ 该 open_id）
 - `FEISHU_GROUP_REQUIRE_MENTION`（默认 `true`）
+- `FEISHU_WS_ENABLED`（默认 `true`；启动 Feishu WebSocket 长连接 receiver）
 - `FEISHU_MAX_RETRIES`（默认 `2`）
 - `FEISHU_RETRY_BACKOFF_SECONDS`（默认 `0.5`）
 
@@ -161,6 +162,18 @@ DEVELOPMENT.md       # 本文档
 3. 处理 challenge（`url_verification`）
 4. 解析事件，接受私聊文本；群聊默认要求 @ 机器人后触发
 5. 异步处理具体消息（立即返回 `{"code": 0}`）
+
+### 5.1b WebSocket 长连接入口
+
+`FastAPI startup` -> `FeishuWebSocketReceiver.start()` -> `lark_oapi.ws.Client` -> `FeishuWebhookHandler.handle_websocket_event`
+
+处理顺序：
+
+1. 启动独立线程运行官方 lark-oapi WebSocket client
+2. 为 WebSocket 线程创建独立 asyncio event loop，避免与 uvicorn loop 冲突
+3. 接收 `im.message.receive_v1`
+4. 将 lark-oapi 事件对象转换为统一 `FeishuTextMessageEvent`
+5. 复用 `_handle_text_event`，因此命令、触发词、会话、去重、Codex 调用逻辑与 webhook 完全一致
 
 ### 5.2 消息处理（_handle_text_event）
 

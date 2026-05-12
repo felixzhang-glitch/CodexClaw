@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     feishu_api_base: str = Field(default="https://open.feishu.cn", validation_alias="FEISHU_API_BASE")
     feishu_bot_open_id: str = Field(default="", validation_alias="FEISHU_BOT_OPEN_ID")
     feishu_group_require_mention: bool = Field(default=True, validation_alias="FEISHU_GROUP_REQUIRE_MENTION")
+    feishu_ws_enabled: bool = Field(default=True, validation_alias="FEISHU_WS_ENABLED")
     feishu_max_retries: int = Field(default=2, validation_alias="FEISHU_MAX_RETRIES")
     feishu_retry_backoff_seconds: float = Field(default=0.5, validation_alias="FEISHU_RETRY_BACKOFF_SECONDS")
 

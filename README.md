@@ -90,6 +90,7 @@ start.sh
 - `http://0.0.0.0:8080`
 - 健康检查：`GET /healthz`
 - Feishu 回调：`POST /webhook/feishu`
+- 默认同时启用 Feishu WebSocket 长连接；开启后无需公网回调地址即可收消息。
 
 ## Feishu 配置（一次）
 
@@ -97,7 +98,14 @@ start.sh
 
 - [Feishu 渠道配置（获取应用凭证）](https://docs.openclaw.ai/zh-CN/channels/feishu#3-%E8%8E%B7%E5%8F%96%E5%BA%94%E7%94%A8%E5%87%AD%E8%AF%81)
 
-在 Feishu 开放平台配置：
+默认推荐使用长连接模式：
+
+1. 开通事件订阅并选择长连接。
+2. 订阅事件：`im.message.receive_v1`
+3. 给应用开通机器人发消息权限（读取、回复、主动发送 IM 文本和图片、上传图片）
+4. 在应用可用范围内允许私聊机器人
+
+如改用 webhook 模式，再在 Feishu 开放平台配置：
 
 1. 事件订阅地址填：
 
@@ -134,6 +142,7 @@ https://<你的公网域名>/webhook/feishu
 - `FEISHU_ENCRYPT_KEY`
 - `FEISHU_BOT_OPEN_ID`（可选；配置后群聊只响应 @ 该 open_id）
 - `FEISHU_GROUP_REQUIRE_MENTION=true`
+- `FEISHU_WS_ENABLED=true`
 - `FEISHU_MAX_RETRIES=2`
 - `FEISHU_RETRY_BACKOFF_SECONDS=0.5`
 - `CODEX_CLI_BIN=/Applications/Codex.app/Contents/Resources/codex`

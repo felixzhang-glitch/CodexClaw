@@ -98,6 +98,76 @@ def parse_text_message_event(
     )
 
 
+def parse_text_message_event_object(
+    data: Any,
+    bot_open_id: str = "",
+    group_require_mention: bool = True,
+) -> FeishuTextMessageEvent | None:
+    """Parse lark_oapi websocket event objects with the same rules as webhook JSON."""
+    header = _get_field(data, "header")
+    event_type = _get_field(header, "event_type")
+    if event_type and event_type != "im.message.receive_v1":
+        return None
+
+    event = _get_field(data, "event")
+    if event is None:
+        return None
+
+    message = _get_field(event, "message")
+    if message is None:
+        return None
+
+    if _get_field(message, "message_type") != "text":
+        return None
+
+    chat_type = str(_get_field(message, "chat_type") or "").strip()
+    if chat_type not in {"p2p", "group", "chat"}:
+        return None
+
+    content_raw = _get_field(message, "content")
+    content = _parse_content(content_raw)
+    if content is None:
+        return None
+
+    text = str(_get_field(content, "text") or "").strip()
+    if not text:
+        return None
+
+    if chat_type != "p2p":
+        mention_keys = _matching_mention_keys_object(message=message, bot_open_id=bot_open_id)
+        if group_require_mention and not mention_keys:
+            return None
+        text = _strip_mention_keys(text=text, mention_keys=mention_keys)
+        if not text:
+            return None
+
+    sender = _get_field(event, "sender")
+    sender_id = _get_field(sender, "sender_id")
+    user_id = (
+        _get_field(sender_id, "open_id")
+        or _get_field(sender_id, "user_id")
+        or _get_field(sender_id, "union_id")
+    )
+    if not user_id:
+        return None
+
+    message_id = str(_get_field(message, "message_id") or "").strip()
+    chat_id = str(_get_field(message, "chat_id") or "").strip()
+    event_id = str(_get_field(header, "event_id") or "").strip()
+
+    if not message_id or not chat_id:
+        return None
+
+    return FeishuTextMessageEvent(
+        event_id=event_id,
+        message_id=message_id,
+        chat_id=chat_id,
+        user_id=str(user_id),
+        text=text,
+        chat_type=chat_type,
+    )
+
+
 def _matching_mention_keys(message: dict[str, Any], bot_open_id: str = "") -> list[str]:
     mentions = message.get("mentions")
     if not isinstance(mentions, list):
@@ -128,8 +198,53 @@ def _matching_mention_keys(message: dict[str, Any], bot_open_id: str = "") -> li
     return keys
 
 
+def _matching_mention_keys_object(message: Any, bot_open_id: str = "") -> list[str]:
+    mentions = _get_field(message, "mentions")
+    if not isinstance(mentions, list):
+        return []
+
+    expected_open_id = bot_open_id.strip()
+    keys: list[str] = []
+    for mention in mentions:
+        key = str(_get_field(mention, "key") or "").strip()
+        if not key:
+            continue
+        if not expected_open_id:
+            keys.append(key)
+            continue
+
+        mention_id = _get_field(mention, "id")
+        mention_ids = {
+            str(_get_field(mention_id, "open_id") or "").strip(),
+            str(_get_field(mention_id, "user_id") or "").strip(),
+            str(_get_field(mention_id, "union_id") or "").strip(),
+        }
+        if expected_open_id in mention_ids:
+            keys.append(key)
+    return keys
+
+
 def _strip_mention_keys(text: str, mention_keys: list[str]) -> str:
     cleaned = text
     for key in mention_keys:
         cleaned = cleaned.replace(key, " ")
     return " ".join(cleaned.strip().split())
+
+
+def _get_field(value: Any, name: str) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _parse_content(content_raw: Any) -> Any | None:
+    if isinstance(content_raw, dict):
+        return content_raw
+    if not isinstance(content_raw, str):
+        return None
+    try:
+        return json.loads(content_raw)
+    except json.JSONDecodeError:
+        return None

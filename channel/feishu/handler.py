@@ -23,6 +23,7 @@ from channel.feishu.models import (
     extract_token,
     is_url_verification,
     parse_text_message_event,
+    parse_text_message_event_object,
 )
 from channel.feishu.security import (
     FeishuSecurityError,
@@ -80,6 +81,19 @@ class FeishuWebhookHandler:
 
         asyncio.create_task(self._handle_text_event(event=event, trace_id=trace_id))
         return {"code": 0}
+
+    async def handle_websocket_event(self, data: Any, trace_id: str | None = None) -> None:
+        trace_id = trace_id or uuid.uuid4().hex
+        event = parse_text_message_event_object(
+            data,
+            bot_open_id=self._settings.feishu_bot_open_id,
+            group_require_mention=self._settings.feishu_group_require_mention,
+        )
+        if event is None:
+            logger.info("ignored unsupported websocket event", extra={"trace_id": trace_id, "event": "feishu.ws.ignore"})
+            return
+
+        await self._handle_text_event(event=event, trace_id=trace_id)
 
     async def _handle_text_event(self, event: Any, trace_id: str) -> None:
         if self._deduplicator.seen(event.message_id):

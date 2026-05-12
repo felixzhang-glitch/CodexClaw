@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.logging import setup_logging
 from channel.feishu.client import FeishuClient
 from channel.feishu.handler import FeishuWebhookHandler
+from channel.feishu.ws_receiver import FeishuWebSocketReceiver
 from core.codex.client import CodexClient
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
@@ -48,6 +49,7 @@ feishu_handler = FeishuWebhookHandler(
     task_registry=task_registry,
     reminder_scheduler=reminder_scheduler,
 )
+feishu_ws_receiver = FeishuWebSocketReceiver(settings=settings, handler=feishu_handler)
 
 
 @app.get("/healthz")
@@ -74,10 +76,12 @@ async def feishu_webhook(request: Request) -> JSONResponse:
 @app.on_event("startup")
 async def startup_event() -> None:
     await reminder_scheduler.start()
+    await feishu_ws_receiver.start()
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    await feishu_ws_receiver.stop()
     await reminder_scheduler.close()
     await feishu_client.close()
     await codex_client.close()
