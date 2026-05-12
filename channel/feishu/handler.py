@@ -89,6 +89,13 @@ class FeishuWebhookHandler:
         session_key = SessionManager.build_key(user_id=event.user_id, chat_id=event.chat_id)
         normalized_text = event.text.strip().lower()
 
+        if not self._is_authorized_user(event.user_id):
+            logger.warning(
+                "unauthorized user ignored",
+                extra={"trace_id": trace_id, "event": "feishu.unauthorized", "user_id": event.user_id},
+            )
+            return
+
         if normalized_text == "/stop":
             await self._handle_stop_command(
                 message_id=event.message_id,
@@ -133,8 +140,28 @@ class FeishuWebhookHandler:
             )
             return
 
+        codex_prompt = self._extract_codex_prompt(event.text)
+        if codex_prompt is None:
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text="未触发 Codex。请使用 /codex <任务>，或明确说“联动 Codex ...”。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-not-triggered",
+            )
+            return
+        if not codex_prompt:
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text="请在 /codex 后输入任务内容。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-empty-trigger",
+            )
+            return
+
         history_messages = self._sessions.build_messages(session_key)
-        messages = history_messages + [{"role": "user", "content": event.text}]
+        messages = history_messages + [{"role": "user", "content": codex_prompt}]
         started = self._task_registry.start(
             key=session_key,
             trace_id=trace_id,
@@ -160,7 +187,7 @@ class FeishuWebhookHandler:
         )
         generated_since = time.time()
         delivered_image_paths: list[str] = []
-        auto_complete_on_image = self._looks_like_image_request(event.text)
+        auto_complete_on_image = self._looks_like_image_request(codex_prompt)
         image_watch_task: asyncio.Task[None] | None = None
         if auto_complete_on_image:
             image_watch_task = asyncio.create_task(
@@ -206,7 +233,7 @@ class FeishuWebhookHandler:
                     already_sent_image_paths=delivered_image_paths,
                 )
 
-            self._sessions.append_round(key=session_key, user=event.text, assistant=answer)
+            self._sessions.append_round(key=session_key, user=codex_prompt, assistant=answer)
         except CodexClientCancelled:
             if auto_complete_on_image and delivered_image_paths:
                 logger.info(
@@ -214,7 +241,7 @@ class FeishuWebhookHandler:
                     extra={"trace_id": trace_id, "event": "pipeline.image_auto_complete"},
                 )
                 answer = self._format_generated_image_refs(delivered_image_paths)
-                self._sessions.append_round(key=session_key, user=event.text, assistant=answer)
+                self._sessions.append_round(key=session_key, user=codex_prompt, assistant=answer)
                 return
             logger.info("message cancelled by user", extra={"trace_id": trace_id, "event": "pipeline.cancel"})
             await self._safe_reply(
@@ -651,6 +678,43 @@ class FeishuWebhookHandler:
         token = extract_token(payload)
         if token != self._settings.feishu_verification_token:
             raise HTTPException(status_code=401, detail="verification token mismatch")
+
+    def _is_authorized_user(self, user_id: str) -> bool:
+        raw = str(getattr(self._settings, "codex_allowed_user_ids", "") or "").strip()
+        if not raw:
+            return True
+        allowed = {item.strip() for item in raw.split(",") if item.strip()}
+        return user_id in allowed
+
+    def _extract_codex_prompt(self, text: str) -> str | None:
+        content = text.strip()
+        if not content:
+            return ""
+
+        trigger_required = bool(getattr(self._settings, "codex_trigger_required", False))
+        if not trigger_required:
+            return content
+
+        raw_prefixes = str(
+            getattr(
+                self._settings,
+                "codex_trigger_prefixes",
+                "/codex,联动 Codex,联动codex,交给 Codex,让 Codex 处理",
+            )
+            or ""
+        )
+        prefixes = [prefix.strip() for prefix in raw_prefixes.split(",") if prefix.strip()]
+        lower_content = content.lower()
+        for prefix in prefixes:
+            lower_prefix = prefix.lower()
+            if lower_content == lower_prefix:
+                return ""
+            if lower_content.startswith(lower_prefix + " "):
+                return content[len(prefix) :].strip()
+            if lower_content.startswith(lower_prefix + "\n"):
+                return content[len(prefix) :].strip()
+
+        return None
 
     @staticmethod
     def _parse_payload(raw_body: bytes) -> dict[str, Any]:

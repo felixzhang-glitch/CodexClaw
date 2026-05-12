@@ -27,8 +27,11 @@ class Settings(BaseSettings):
     codex_api_base: str = Field(default="https://api.openai.com/v1", validation_alias="CODEX_API_BASE")
     codex_api_key: str = Field(default="", validation_alias="CODEX_API_KEY")
     codex_model: str = Field(default="", validation_alias="CODEX_MODEL")
-    codex_cli_bin: str = Field(default="codex", validation_alias="CODEX_CLI_BIN")
-    codex_work_dir: str = Field(default="./runtime/codex-workdir", validation_alias="CODEX_WORK_DIR")
+    codex_cli_bin: str = Field(
+        default="/Applications/Codex.app/Contents/Resources/codex",
+        validation_alias="CODEX_CLI_BIN",
+    )
+    codex_work_dir: str = Field(default="/Users/cesclaw/Desktop/All of CDOU", validation_alias="CODEX_WORK_DIR")
     codex_generated_images_dir: str = Field(
         default="~/.codex/generated_images",
         validation_alias="CODEX_GENERATED_IMAGES_DIR",
@@ -42,6 +45,12 @@ class Settings(BaseSettings):
     codex_circuit_breaker_cooldown_seconds: int = Field(
         default=30,
         validation_alias="CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
+    )
+    codex_allowed_user_ids: str = Field(default="", validation_alias="CODEX_ALLOWED_USER_IDS")
+    codex_trigger_required: bool = Field(default=True, validation_alias="CODEX_TRIGGER_REQUIRED")
+    codex_trigger_prefixes: str = Field(
+        default="/codex,联动 Codex,联动codex,交给 Codex,让 Codex 处理",
+        validation_alias="CODEX_TRIGGER_PREFIXES",
     )
 
     max_history_rounds: int = Field(default=10, validation_alias="MAX_HISTORY_ROUNDS")

@@ -94,25 +94,82 @@ ensure_runtime_paths() {
 }
 
 ensure_prerequisites() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "[ERROR] 未找到 python3，请先安装 Python 3.10+"
+  local python_bin="${PYTHON_BIN:-}"
+  if [[ -z "$python_bin" ]]; then
+    if command -v python3.11 >/dev/null 2>&1; then
+      python_bin="$(command -v python3.11)"
+    elif [[ -x /opt/homebrew/bin/python3.11 ]]; then
+      python_bin="/opt/homebrew/bin/python3.11"
+    else
+      python_bin="$(command -v python3 || true)"
+    fi
+  fi
+
+  if [[ -z "$python_bin" ]]; then
+    echo "[ERROR] 未找到 Python，请先安装 Python 3.10+"
     exit 1
   fi
 
-  if ! command -v codex >/dev/null 2>&1; then
-    echo "[ERROR] 未找到 codex CLI，请先在 root 环境完成 codex 安装与登录。"
-    exit 1
-  fi
 
   if [[ ! -f .env ]]; then
     cp .env.example .env
   fi
 
+  if [[ -z "$(read_env_from_file CODEX_CLI_BIN)" ]]; then
+    if [[ -x /Applications/Codex.app/Contents/Resources/codex ]]; then
+      set_env_in_file "CODEX_CLI_BIN" "/Applications/Codex.app/Contents/Resources/codex"
+    else
+      set_env_in_file "CODEX_CLI_BIN" "codex"
+    fi
+  fi
+
+  local codex_bin
+  codex_bin="$(get_effective_value CODEX_CLI_BIN)"
+  if [[ "$codex_bin" == */* ]]; then
+    if [[ ! -x "$codex_bin" ]]; then
+      echo "[ERROR] CODEX_CLI_BIN 不可执行: $codex_bin"
+      exit 1
+    fi
+  elif ! command -v "$codex_bin" >/dev/null 2>&1; then
+    echo "[ERROR] 未找到 codex CLI，请先完成 Codex 安装与登录。"
+    exit 1
+  fi
+
   if [[ ! -d .venv ]]; then
-    python3 -m venv .venv
+    "$python_bin" -m venv .venv
+  fi
+
+  if [[ -x .venv/bin/python ]]; then
+    local existing_version
+    existing_version="$(.venv/bin/python - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+    case "$existing_version" in
+      3.10|3.11|3.12|3.13|3.14|3.15) ;;
+      *)
+        echo "[WARN] 现有 .venv Python=$existing_version，低于 3.10，重新创建虚拟环境。"
+        rm -rf .venv
+        "$python_bin" -m venv .venv
+        ;;
+    esac
   fi
 
   source .venv/bin/activate
+  local version_info
+  version_info="$(python - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+  case "$version_info" in
+    3.10|3.11|3.12|3.13|3.14|3.15) ;;
+    *)
+      echo "[ERROR] 当前虚拟环境 Python=$version_info，需 Python 3.10+；请删除 .venv 后用 PYTHON_BIN 指定新版 Python。"
+      exit 1
+      ;;
+  esac
   python -m pip install --upgrade pip >/dev/null
   python -m pip install -r requirements.txt >/dev/null
 
@@ -124,7 +181,7 @@ ensure_prerequisites() {
   fi
 
   if [[ -z "$(read_env_from_file CODEX_WORK_DIR)" ]]; then
-    set_env_in_file "CODEX_WORK_DIR" "./runtime/codex-workdir"
+    set_env_in_file "CODEX_WORK_DIR" "/Users/cesclaw/Desktop/All of CDOU"
   fi
 
   local work_dir
