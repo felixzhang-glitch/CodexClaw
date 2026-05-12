@@ -1,6 +1,8 @@
 # CodexClaw (Feishu + Codex MVP)
 
-一个单实例可运行服务：接收 Feishu 私聊文本消息，显式触发后调用本机 `codex exec`（默认 `workspace-write` 权限）处理并回传 Feishu，支持 streaming 分段回复。
+一个单实例可运行服务：接收 Feishu 私聊文本消息，显式触发后调用本机 `codex exec`（默认 `full` 权限）处理并回传 Feishu，支持 streaming 分段回复。
+
+默认配置面向个人 Mac mini trusted deployment。必须保留 `CODEX_ALLOWED_USER_IDS` 白名单和显式触发词，避免把 Feishu 入口变成开放的远程执行面。
 
 ## 功能覆盖
 
@@ -137,7 +139,7 @@ https://<你的公网域名>/webhook/feishu
 - `CODEX_CLI_BIN=/Applications/Codex.app/Contents/Resources/codex`
 - `CODEX_WORK_DIR=/Users/cesclaw/Desktop/All of CDOU`
 - `CODEX_MODEL`（可空，留空时使用 codex CLI 默认模型）
-- `CODEX_PERMISSION_MODE=workspace-write`
+- `CODEX_PERMISSION_MODE=full`
 - `CODEX_TIMEOUT_SECONDS=30`
 - `CODEX_STREAM_READ_LIMIT_BYTES=262144`
 - `CODEX_CIRCUIT_BREAKER_THRESHOLD=5`

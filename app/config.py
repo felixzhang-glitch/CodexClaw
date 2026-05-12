@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         default="~/.codex/generated_images",
         validation_alias="CODEX_GENERATED_IMAGES_DIR",
     )
-    codex_permission_mode: str = Field(default="workspace-write", validation_alias="CODEX_PERMISSION_MODE")
+    codex_permission_mode: str = Field(default="full", validation_alias="CODEX_PERMISSION_MODE")
     codex_timeout_seconds: float = Field(default=30.0, validation_alias="CODEX_TIMEOUT_SECONDS")
     codex_stream_read_limit_bytes: int = Field(default=262144, validation_alias="CODEX_STREAM_READ_LIMIT_BYTES")
     codex_max_retries: int = Field(default=2, validation_alias="CODEX_MAX_RETRIES")

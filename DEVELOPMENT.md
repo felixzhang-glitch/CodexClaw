@@ -8,7 +8,7 @@ CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
 
 1. 接收 Feishu 事件回调。
 2. 解析/校验消息并维护会话上下文。
-3. 在显式触发后调用本机 `codex exec`（默认 `workspace-write` 权限）生成答案。
+3. 在显式触发后调用本机 `codex exec`（默认 `full` 权限）生成答案。
 4. 将结果回传 Feishu。
 
 当前实现特性：
@@ -93,7 +93,7 @@ DEVELOPMENT.md       # 本文档
 2. 自动创建 `.venv` 并安装依赖。
 3. 初始化 `.env`（若不存在则由 `.env.example` 复制）。
 4. 引导填写 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。
-5. 确保 `CODEX_PERMISSION_MODE=workspace-write`。
+5. 确保 `CODEX_PERMISSION_MODE=full`。
 6. 启动 Uvicorn。
 
 ---
@@ -118,7 +118,7 @@ DEVELOPMENT.md       # 本文档
 
 - `CODEX_CLI_BIN`（默认 `/Applications/Codex.app/Contents/Resources/codex`）
 - `CODEX_WORK_DIR`（默认 `/Users/cesclaw/Desktop/All of CDOU`）
-- `CODEX_PERMISSION_MODE`（默认 `workspace-write`）
+- `CODEX_PERMISSION_MODE`（默认 `full`；仅适合个人 Mac mini trusted deployment，必须配合白名单和显式触发）
 - `CODEX_MODEL`（可空；空时使用本机 codex 默认模型）
 - `CODEX_TIMEOUT_SECONDS`：单次读取 stdout 新行的超时时间，不是总任务时长上限
 - `CODEX_STREAM_READ_LIMIT_BYTES`：subprocess stream 读取上限，避免超长单行 JSON 触发默认 64KB 限制

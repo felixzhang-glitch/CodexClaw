@@ -177,7 +177,7 @@ PY
   prompt_if_empty "FEISHU_APP_SECRET" "请输入 Feishu App Secret: "
 
   if [[ -z "$(read_env_from_file CODEX_PERMISSION_MODE)" ]]; then
-    set_env_in_file "CODEX_PERMISSION_MODE" "workspace-write"
+    set_env_in_file "CODEX_PERMISSION_MODE" "full"
   fi
 
   if [[ -z "$(read_env_from_file CODEX_WORK_DIR)" ]]; then
