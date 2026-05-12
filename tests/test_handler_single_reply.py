@@ -86,13 +86,16 @@ class FakeCodexClient:
     def __init__(self) -> None:
         self.cancelled = False
         self.messages: list[list[dict[str, str]]] = []
+        self.reasoning_efforts: list[str | None] = []
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+    async def chat(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None) -> str:
         self.messages.append(messages)
+        self.reasoning_efforts.append(reasoning_effort)
         return "你好"
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None):
         self.messages.append(messages)
+        self.reasoning_efforts.append(reasoning_effort)
         for piece in ["你", "好"]:
             yield piece
 
@@ -106,7 +109,7 @@ class ImageCodexClient(FakeCodexClient):
         super().__init__()
         self._image_path = image_path
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None):
         yield f"Generated Image:\nSaved to: file://{self._image_path}"
 
 
@@ -115,7 +118,7 @@ class EmptyImageCodexClient(FakeCodexClient):
         super().__init__()
         self._image_path = image_path
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None):
         self._image_path.write_bytes(b"fake image")
         if False:
             yield ""
@@ -127,7 +130,7 @@ class BlockingImageCodexClient(FakeCodexClient):
         self._image_path = image_path
         self.cancelled_event = asyncio.Event()
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None):
         self._image_path.write_bytes(b"fake image")
         while not self.cancelled_event.is_set():
             await asyncio.sleep(0.05)
@@ -147,11 +150,32 @@ class WatchRaceImageCodexClient(FakeCodexClient):
         self._image_path = image_path
         self._image_upload_started_event = image_upload_started_event
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None):
         self._image_path.write_bytes(b"fake image")
         await asyncio.wait_for(self._image_upload_started_event.wait(), timeout=2.0)
         if False:
             yield ""
+
+
+def test_extract_reasoning_effort_option() -> None:
+    prompt, effort = FeishuWebhookHandler._extract_reasoning_effort("--effort high 深度分析")
+
+    assert prompt == "深度分析"
+    assert effort == "high"
+
+
+def test_extract_reasoning_effort_equals_option() -> None:
+    prompt, effort = FeishuWebhookHandler._extract_reasoning_effort("--effort=low 快速回答")
+
+    assert prompt == "快速回答"
+    assert effort == "low"
+
+
+def test_extract_reasoning_effort_invalid_option_is_left_in_prompt() -> None:
+    prompt, effort = FeishuWebhookHandler._extract_reasoning_effort("--effort turbo 分析")
+
+    assert prompt == "--effort turbo 分析"
+    assert effort is None
 
 
 @pytest.mark.asyncio
@@ -257,6 +281,41 @@ async def test_handle_text_event_strips_codex_trigger() -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_text_event_passes_reasoning_effort_override() -> None:
+    settings = SimpleNamespace(
+        streaming_enabled=True,
+        task_running_notice_seconds=30.0,
+        feishu_encrypt_key="",
+        feishu_verification_token="",
+        codex_trigger_required=True,
+        codex_trigger_prefixes="/codex",
+        codex_allowed_user_ids="",
+    )
+    feishu_client = FakeFeishuClient()
+    codex_client = FakeCodexClient()
+    handler = FeishuWebhookHandler(
+        settings=settings,
+        feishu_client=feishu_client,
+        codex_client=codex_client,
+        session_manager=SessionManager(max_history_rounds=10),
+        deduplicator=MessageDeduplicator(ttl_seconds=3600),
+        task_registry=ActiveTaskRegistry(),
+    )
+
+    event = SimpleNamespace(
+        message_id="om_test_effort",
+        user_id="ou_test_1",
+        chat_id="oc_test_1",
+        text="/codex --effort high 检查 inbox",
+    )
+
+    await handler._handle_text_event(event=event, trace_id="trace-effort")
+
+    assert codex_client.messages[-1][-1]["content"] == "检查 inbox"
+    assert codex_client.reasoning_efforts == ["high"]
+
+
+@pytest.mark.asyncio
 async def test_handle_text_event_rejects_unauthorized_user() -> None:
     settings = SimpleNamespace(
         streaming_enabled=True,
@@ -297,10 +356,10 @@ class BlockingCodexClient:
         self.cancelled = asyncio.Event()
         self.finished = asyncio.Event()
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+    async def chat(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None) -> str:
         return "unused"
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None):
         while not self.cancelled.is_set() and not self.finished.is_set():
             await asyncio.sleep(0.01)
         if self.cancelled.is_set():

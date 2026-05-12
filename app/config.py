@@ -47,6 +47,7 @@ class Settings(BaseSettings):
         default=30,
         validation_alias="CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
     )
+    codex_reasoning_effort: str = Field(default="medium", validation_alias="CODEX_REASONING_EFFORT")
     codex_allowed_user_ids: str = Field(default="", validation_alias="CODEX_ALLOWED_USER_IDS")
     codex_trigger_required: bool = Field(default=True, validation_alias="CODEX_TRIGGER_REQUIRED")
     codex_trigger_prefixes: str = Field(

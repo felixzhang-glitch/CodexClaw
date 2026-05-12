@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shlex
 import time
 import uuid
 from collections.abc import Mapping
@@ -35,6 +36,8 @@ from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
 from core.session.reminder_scheduler import ReminderScheduler
 from core.session.task_registry import ActiveTaskRegistry
+
+ALLOWED_REASONING_EFFORTS = {"low", "medium", "high", "xhigh"}
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +177,17 @@ class FeishuWebhookHandler:
             )
             return
 
+        codex_prompt, reasoning_effort = self._extract_reasoning_effort(codex_prompt)
+        if not codex_prompt:
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text="请在 /codex 参数后输入任务内容。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-empty-after-options",
+            )
+            return
+
         history_messages = self._sessions.build_messages(session_key)
         messages = history_messages + [{"role": "user", "content": codex_prompt}]
         started = self._task_registry.start(
@@ -225,9 +239,14 @@ class FeishuWebhookHandler:
                     generated_since=generated_since,
                     already_sent_image_paths=delivered_image_paths,
                     include_recent_generated_images=auto_complete_on_image,
+                    reasoning_effort=reasoning_effort,
                 )
             else:
-                answer = await self._codex_client.chat(messages=messages, trace_id=trace_id)
+                answer = await self._codex_client.chat(
+                    messages=messages,
+                    trace_id=trace_id,
+                    reasoning_effort=reasoning_effort,
+                )
                 generated_images = []
                 if auto_complete_on_image:
                     generated_images = self._filter_unsent_images(
@@ -288,11 +307,16 @@ class FeishuWebhookHandler:
         generated_since: float,
         already_sent_image_paths: list[str] | None = None,
         include_recent_generated_images: bool = False,
+        reasoning_effort: str | None = None,
     ) -> str:
         start = time.monotonic()
         full_text_parts: list[str] = []
 
-        async for piece in self._codex_client.chat_stream(messages=messages, trace_id=trace_id):
+        async for piece in self._codex_client.chat_stream(
+            messages=messages,
+            trace_id=trace_id,
+            reasoning_effort=reasoning_effort,
+        ):
             full_text_parts.append(piece)
 
         answer = "".join(full_text_parts).strip()
@@ -729,6 +753,38 @@ class FeishuWebhookHandler:
                 return content[len(prefix) :].strip()
 
         return None
+
+    @staticmethod
+    def _extract_reasoning_effort(prompt: str) -> tuple[str, str | None]:
+        try:
+            parts = shlex.split(prompt)
+        except ValueError:
+            return prompt, None
+
+        if not parts:
+            return "", None
+
+        effort: str | None = None
+        consumed = 0
+        first = parts[0].lower()
+        if first in {"--effort", "--reasoning", "--reasoning-effort"}:
+            if len(parts) >= 2 and parts[1].lower() in ALLOWED_REASONING_EFFORTS:
+                effort = parts[1].lower()
+                consumed = 2
+        else:
+            for prefix in ("--effort=", "--reasoning=", "--reasoning-effort="):
+                if first.startswith(prefix):
+                    value = first[len(prefix) :].lower()
+                    if value in ALLOWED_REASONING_EFFORTS:
+                        effort = value
+                        consumed = 1
+                    break
+
+        if not consumed:
+            return prompt, None
+
+        cleaned = " ".join(parts[consumed:]).strip()
+        return cleaned, effort
 
     @staticmethod
     def _parse_payload(raw_body: bytes) -> dict[str, Any]:

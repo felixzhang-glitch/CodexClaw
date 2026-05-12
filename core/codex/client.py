@@ -43,7 +43,7 @@ class CodexClient:
         # CLI mode does not keep a persistent network client.
         return None
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+    async def chat(self, messages: list[dict[str, str]], trace_id: str, reasoning_effort: str | None = None) -> str:
         self._assert_circuit_closed()
 
         prompt = self._build_prompt(messages)
@@ -54,7 +54,7 @@ class CodexClient:
         try:
             while True:
                 try:
-                    text = await self._run_chat_once(prompt=prompt, trace_id=trace_id)
+                    text = await self._run_chat_once(prompt=prompt, trace_id=trace_id, reasoning_effort=reasoning_effort)
                     self._record_success()
                     duration_ms = int((time.monotonic() - start) * 1000)
                     logger.info(
@@ -98,7 +98,12 @@ class CodexClient:
         finally:
             self._clear_cancel_request(trace_id)
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str) -> AsyncIterator[str]:
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        trace_id: str,
+        reasoning_effort: str | None = None,
+    ) -> AsyncIterator[str]:
         self._assert_circuit_closed()
 
         prompt = self._build_prompt(messages)
@@ -111,7 +116,11 @@ class CodexClient:
                 emitted = False
                 preview_parts: list[str] = []
                 try:
-                    async for piece in self._run_stream_once(prompt=prompt, trace_id=trace_id):
+                    async for piece in self._run_stream_once(
+                        prompt=prompt,
+                        trace_id=trace_id,
+                        reasoning_effort=reasoning_effort,
+                    ):
                         emitted = True
                         if len("".join(preview_parts)) < 240:
                             preview_parts.append(piece)
@@ -199,8 +208,8 @@ class CodexClient:
                 process.kill()
         return True
 
-    async def _run_chat_once(self, prompt: str, trace_id: str) -> str:
-        command = self._build_command(prompt)
+    async def _run_chat_once(self, prompt: str, trace_id: str, reasoning_effort: str | None = None) -> str:
+        command = self._build_command(prompt, reasoning_effort=reasoning_effort)
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
@@ -259,8 +268,13 @@ class CodexClient:
         fallback = "\n".join(fallback_parts).strip()
         return self._join_answer_parts(fallback, media_refs)
 
-    async def _run_stream_once(self, prompt: str, trace_id: str) -> AsyncIterator[str]:
-        command = self._build_command(prompt)
+    async def _run_stream_once(
+        self,
+        prompt: str,
+        trace_id: str,
+        reasoning_effort: str | None = None,
+    ) -> AsyncIterator[str]:
+        command = self._build_command(prompt, reasoning_effort=reasoning_effort)
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
@@ -334,7 +348,7 @@ class CodexClient:
             for chunk in self._split_chunks("\n".join(media_refs)):
                 yield chunk
 
-    def _build_command(self, prompt: str) -> list[str]:
+    def _build_command(self, prompt: str, reasoning_effort: str | None = None) -> list[str]:
         command = [
             self._codex_bin,
             "exec",
@@ -350,9 +364,17 @@ class CodexClient:
         if model and model != "codex-mini-latest":
             command.extend(["-m", model])
 
+        command.extend(self._reasoning_args(reasoning_effort))
         command.extend(self._permission_args())
         command.append(prompt)
         return command
+
+    def _reasoning_args(self, override: str | None = None) -> list[str]:
+        default_effort = getattr(self._settings, "codex_reasoning_effort", "medium")
+        effort = (override or default_effort or "medium").strip().lower()
+        if effort not in {"low", "medium", "high", "xhigh"}:
+            effort = "medium"
+        return ["-c", f'model_reasoning_effort="{effort}"']
 
     def _permission_args(self) -> list[str]:
         mode = self._settings.codex_permission_mode.strip().lower()

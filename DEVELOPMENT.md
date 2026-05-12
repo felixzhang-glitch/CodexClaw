@@ -127,6 +127,7 @@ DEVELOPMENT.md       # 本文档
 - `CODEX_RETRY_BACKOFF_SECONDS`
 - `CODEX_CIRCUIT_BREAKER_THRESHOLD`
 - `CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS`
+- `CODEX_REASONING_EFFORT`（默认 `medium`；Gateway 会显式传给 Codex CLI，覆盖 `~/.codex/config.toml` 的默认值）
 - `CODEX_ALLOWED_USER_IDS`（可空；逗号分隔 Feishu 用户 open_id 白名单）
 - `CODEX_TRIGGER_REQUIRED`（默认 `true`）
 - `CODEX_TRIGGER_PREFIXES`（默认 `/codex,联动 Codex,联动codex,交给 Codex,让 Codex 处理`）
@@ -183,12 +184,21 @@ DEVELOPMENT.md       # 本文档
 4. 发送 quick ack reaction（`Typing`）
 5. 若当前会话已有运行中任务，直接回复“已有任务在运行中”
 6. 命令分支：`/help` `/new` `/reset` `/compact`
-7. 读取会话历史，拼接当前问题
-8. 在 `task_registry` 中登记运行任务并启动长任务通知定时器
-9. 调用 Codex CLI
-10. 回发答案（单条）
-11. 写回会话历史
-12. 清理运行任务登记与定时器
+7. 解析 `/codex --effort low|medium|high|xhigh` 可选参数，并从 prompt 中移除参数
+8. 读取会话历史，拼接当前问题
+9. 在 `task_registry` 中登记运行任务并启动长任务通知定时器
+10. 调用 Codex CLI
+11. 回发答案（单条）
+12. 写回会话历史
+13. 清理运行任务登记与定时器
+
+Codex CLI 调用会显式追加：
+
+```bash
+-c model_reasoning_effort="<effort>"
+```
+
+未指定 `--effort` 时使用 `CODEX_REASONING_EFFORT=medium`。
 
 `/remind` 命令不进入 Codex 执行链路，会登记到单实例调度器并持久化到 `REMINDER_STORE_PATH`，到期后通过 `im/v1/messages?receive_id_type=chat_id` 主动发送。
 

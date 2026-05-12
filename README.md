@@ -130,7 +130,8 @@ https://<你的公网域名>/webhook/feishu
 - `/compact`：压缩当前会话上下文，保留最近 2 轮；`/compress` 同义
 - `/stop`：终止当前会话中正在运行的任务
 - `/remind 10m 喝水`：10 分钟后主动发送“喝水”；时间单位支持 `s/m/h/d`
-- `/codex <任务>`：显式触发 Codex 执行任务
+- `/codex <任务>`：显式触发 Codex 执行任务，默认 reasoning effort 为 `medium`
+- `/codex --effort high <任务>`：本次任务使用指定 reasoning effort；支持 `low/medium/high/xhigh`
 
 ## 配置项
 
@@ -153,6 +154,7 @@ https://<你的公网域名>/webhook/feishu
 - `CODEX_STREAM_READ_LIMIT_BYTES=262144`
 - `CODEX_CIRCUIT_BREAKER_THRESHOLD=5`
 - `CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS=30`
+- `CODEX_REASONING_EFFORT=medium`
 - `CODEX_ALLOWED_USER_IDS`（可空；逗号分隔 Feishu 用户 open_id 白名单）
 - `CODEX_TRIGGER_REQUIRED=true`
 - `CODEX_TRIGGER_PREFIXES=/codex,联动 Codex,联动codex,交给 Codex,让 Codex 处理`
