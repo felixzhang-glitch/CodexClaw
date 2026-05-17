@@ -1,10 +1,11 @@
-# CodexClaw (Feishu + Codex MVP)
+# CodexClaw (Feishu/WeChat + Codex MVP)
 
-一个单实例可运行服务：接收 Feishu 私聊文本消息，调用本机 `codex exec`（`full` 权限）处理后回传 Feishu，支持 streaming 分段回复。
+一个单实例可运行服务：接收 Feishu 或 WeChat 私聊文本消息，调用本机 `codex exec`（`full` 权限）处理后回传，支持 streaming 汇总回复。
 
 ## 功能覆盖
 
 - Feishu Webhook 回调接入
+- WeChat ClawBot 文本私聊接入（通过轻量 sidecar 长轮询 iLink Bot API）
 - URL challenge 校验
 - 签名校验（配置 `FEISHU_ENCRYPT_KEY` 后启用）
 - 私聊文本消息处理（`im.message.receive_v1`）
@@ -28,26 +29,26 @@
 ## 项目结构
 
 ```text
-app/
+bin/
+  server
+  start
+conf/
+  .env.example
+lib/python/
+  app/
   config.py
   commands.py
   logging.py
   main.py
-channel/feishu/
-  client.py
-  handler.py
-  models.py
-  security.py
-core/codex/
-  client.py
-core/session/
-  manager.py
-  deduplicator.py
+  channel/feishu/
+  channel/wechat/
+  core/codex/
+  core/session/
+lib/js/
+  wechat-sidecar.mjs
+logs/
+md/
 tests/
-server
-start
-start.sh
-.env.example
 ```
 
 ## 5 分钟快速启动（最少操作）
@@ -55,13 +56,13 @@ start.sh
 1. 执行（默认后台启动）：
 
 ```bash
-./start
+./bin/start
 ```
 
 或前台启动并直接打印日志：
 
 ```bash
-./start -f
+./bin/start -f
 ```
 
 2. 首次启动会提示输入：
@@ -69,18 +70,18 @@ start.sh
 - `FEISHU_APP_ID`（形如 `cli_xxx`）
 - `FEISHU_APP_SECRET`
 
-脚本会自动：创建虚拟环境、安装依赖、写入 `.env`、创建独立 Codex 工作目录并启动服务。
+脚本会自动：创建虚拟环境、安装依赖、写入 `conf/.env`、创建独立 Codex 工作目录并启动服务。
 
 3. 常用服务命令：
 
 ```bash
-./server help
-./server status
-./server stop
-./server start -f
+./bin/server help
+./bin/server status
+./bin/server stop
+./bin/server start -f
 ```
 
-`./start` 会转发到 `./server start`，`./start -f` 会转发到 `./server start -f`。
+`./bin/start` 会转发到 `./bin/server start`，`./bin/start -f` 会转发到 `./bin/server start -f`。
 
 4. 服务默认监听：
 
@@ -111,6 +112,43 @@ https://<你的公网域名>/webhook/feishu
 - 若启用验证 Token，请将同值写到 `FEISHU_VERIFICATION_TOKEN`
 - 若启用加密 Key，请写到 `FEISHU_ENCRYPT_KEY`（会自动启用签名校验）
 
+## WeChat 配置（可选）
+
+WeChat 接入使用轻量 sidecar。sidecar 负责扫码登录、`getupdates` 长轮询和 `sendmessage`，CodexClaw 只暴露本地 webhook 处理文本对话。
+
+1. 在 `conf/.env` 中配置一个本地共享 token：
+
+```bash
+WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
+```
+
+2. 启动 CodexClaw：
+
+```bash
+./bin/start
+```
+
+3. 扫码登录微信 ClawBot：
+
+```bash
+./bin/server wx login
+```
+
+登录成功后，凭证会保存到 `conf/wechat/account.json`。该文件已被 `.gitignore` 忽略，不要提交。
+
+4. 启动 sidecar：
+
+```bash
+./bin/server wx start
+```
+
+默认连接：
+
+- CodexClaw: `http://127.0.0.1:8080/webhook/wechat`
+- sidecar health: `http://127.0.0.1:8787/healthz`
+
+当前 WeChat 版本先支持私聊文本、语音转文字文本、`/new`、`/reset`、`/compact`、`/help`、`/stop`。图片、文件、typing 和定时提醒后续再补。
+
 ## 命令说明
 
 - `/help`：显示帮助
@@ -122,7 +160,7 @@ https://<你的公网域名>/webhook/feishu
 
 ## 配置项
 
-默认值见 `.env.example`：
+默认值见 `conf/.env.example`：
 
 - `FEISHU_APP_ID`
 - `FEISHU_APP_SECRET`
@@ -145,6 +183,8 @@ https://<你的公网域名>/webhook/feishu
 - `STREAMING_ENABLED=true`
 - `TASK_RUNNING_NOTICE_SECONDS=30`
 - `FEISHU_MESSAGE_CHUNK_CHARS=120`
+- `WECHAT_WEBHOOK_TOKEN`
+- `WECHAT_MESSAGE_CHUNK_CHARS=1800`
 - `REMINDER_STORE_PATH=./runtime/server/reminders.json`
 - `SERVER_PORT`
 - `LOG_LEVEL`
@@ -155,7 +195,7 @@ https://<你的公网域名>/webhook/feishu
 
 ```bash
 source .venv/bin/activate
-pytest -q
+pytest -c conf/pytest.ini -q
 ```
 
 覆盖内容：

@@ -34,22 +34,22 @@ CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
 ## 2. 目录结构
 
 ```text
-app/
+lib/python/app/
   config.py          # 环境变量与配置
   logging.py         # JSON 结构化日志
   commands.py        # /help /new /reset /stop
   main.py            # FastAPI 入口
 
-channel/feishu/
+lib/python/channel/feishu/
   models.py          # Feishu 事件解析模型
   security.py        # 签名校验与解密
   client.py          # Feishu OpenAPI 调用（reply/reaction/token）
   handler.py         # Feishu webhook 主处理流程
 
-core/codex/
+lib/python/core/codex/
   client.py          # 本机 codex CLI 调用封装（超时/重试/熔断）
 
-core/session/
+lib/python/core/session/
   manager.py         # 会话存储与 FIFO 裁剪
   deduplicator.py    # message_id 去重
   task_registry.py   # 运行中任务注册与取消
@@ -60,7 +60,7 @@ tests/               # 单元测试
 server               # 服务控制脚本（start/stop/status/help）
 start                # 快捷入口（默认后台，-f 前台）
 start.sh             # 兼容入口（转发到 start）
-.env.example         # 示例配置
+conf/.env.example    # 示例配置
 README.md            # 用户使用说明
 DEVELOPMENT.md       # 本文档
 ```
@@ -71,16 +71,18 @@ DEVELOPMENT.md       # 本文档
 
 ### 3.1 命令入口
 
-- `./start`：后台启动（等价 `./server start`）
-- `./start -f`：前台启动并输出日志（等价 `./server start -f`）
-- `./server stop`：停止服务
-- `./server status`：查看状态
-- `./server help`：查看帮助
+- `./bin/start`：后台启动（等价 `./bin/server start`）
+- `./bin/start -f`：前台启动并输出日志（等价 `./bin/server start -f`）
+- `./bin/server stop`：停止服务
+- `./bin/server restart`：重启服务
+- `./bin/server status`：查看状态
+- `./bin/server wx login`：手动刷新微信扫码登录
+- `./bin/server help`：查看帮助
 
 ### 3.2 运行期文件
 
 - PID 文件：`runtime/server/codexclaw.pid`
-- 日志文件：`runtime/server/codexclaw.log`
+- 日志文件：`logs/codexclaw.log`
 - Codex 工作目录：`runtime/codex-workdir`（可由 `CODEX_WORK_DIR` 覆盖）
 
 ### 3.3 首次启动流程
@@ -89,7 +91,7 @@ DEVELOPMENT.md       # 本文档
 
 1. 检查 `python3` 和 `codex`。
 2. 自动创建 `.venv` 并安装依赖。
-3. 初始化 `.env`（若不存在则由 `.env.example` 复制）。
+3. 初始化 `conf/.env`（若不存在则由 `conf/.env.example` 复制）。
 4. 引导填写 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。
 5. 确保 `CODEX_PERMISSION_MODE=full`。
 6. 启动 Uvicorn。
@@ -98,7 +100,7 @@ DEVELOPMENT.md       # 本文档
 
 ## 4. 配置说明（核心）
 
-配置从 `.env` 读取，关键项如下。
+配置从 `conf/.env` 读取，关键项如下。
 
 ### 4.1 Feishu
 
@@ -147,7 +149,7 @@ DEVELOPMENT.md       # 本文档
 
 ### 5.1 Webhook 入口
 
-`POST /webhook/feishu` -> `app/main.py` -> `FeishuWebhookHandler.handle_webhook`
+`POST /webhook/feishu` -> `lib/python/app/main.py` -> `FeishuWebhookHandler.handle_webhook`
 
 处理顺序：
 
@@ -186,7 +188,7 @@ DEVELOPMENT.md       # 本文档
 
 ## 6. Codex CLI 集成细节
 
-文件：`core/codex/client.py`
+文件：`lib/python/core/codex/client.py`
 
 ### 6.1 命令构造
 
@@ -225,7 +227,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 ### 6.5 取消与长任务通知
 
-- 运行任务按会话维度注册在 `core/session/task_registry.py`
+- 运行任务按会话维度注册在 `lib/python/core/session/task_registry.py`
 - 每个运行任务记录 `trace_id`、`message_id`、启动时间和通知状态
 - 超过 `TASK_RUNNING_NOTICE_SECONDS` 且任务仍在运行时，会主动发送“仍在运行中”提示
 - 用户发送 `/stop` 后：
@@ -237,7 +239,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 ## 7. 会话与记忆
 
-文件：`core/session/manager.py`
+文件：`lib/python/core/session/manager.py`
 
 - 会话 Key：`user_id + ':' + chat_id`
 - 每轮存储：`user` + `assistant`
@@ -255,7 +257,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 ## 8. Feishu 客户端能力
 
-文件：`channel/feishu/client.py`
+文件：`lib/python/channel/feishu/client.py`
 
 - 获取并缓存 `tenant_access_token`
 - 回复文本消息：`POST /im/v1/messages/{message_id}/reply`
@@ -272,7 +274,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 ```bash
 source .venv/bin/activate
-pytest -q
+pytest -c conf/pytest.ini -q
 ```
 
 当前测试覆盖：
@@ -303,14 +305,14 @@ pytest -q
 
 端口被占用：
 
-- 换端口启动：`SERVER_PORT=18080 ./start`
+- 换端口启动：`SERVER_PORT=18080 ./bin/start`
 - 或先停掉旧进程
 
 ### 10.3 收到“服务繁忙，请稍后重试”
 
 查看两类日志：
 
-- `runtime/server/codexclaw.log`
+- `logs/codexclaw.log`
 - 控制台 JSON 日志中的 `event` 与 `error_code`
 
 常见根因：
@@ -329,7 +331,7 @@ pytest -q
 
 如果近期问题集中在复杂任务：
 
-- 先确认 `.env` 中 `CODEX_TIMEOUT_SECONDS` 是否已调高
+- 先确认 `conf/.env` 中 `CODEX_TIMEOUT_SECONDS` 是否已调高
 - 再确认 `TASK_RUNNING_NOTICE_SECONDS` 是否符合预期
 - 如果日志里出现 `chunk is longer than limit`，需要提高 `CODEX_STREAM_READ_LIMIT_BYTES`
 

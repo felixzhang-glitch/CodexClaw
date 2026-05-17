@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.logging import setup_logging
 from channel.feishu.client import FeishuClient
 from channel.feishu.handler import FeishuWebhookHandler
+from channel.wechat.handler import WeChatWebhookHandler
 from core.codex.client import CodexClient
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
@@ -48,6 +49,13 @@ feishu_handler = FeishuWebhookHandler(
     task_registry=task_registry,
     reminder_scheduler=reminder_scheduler,
 )
+wechat_handler = WeChatWebhookHandler(
+    settings=settings,
+    codex_client=codex_client,
+    session_manager=session_manager,
+    deduplicator=deduplicator,
+    task_registry=task_registry,
+)
 
 
 @app.get("/healthz")
@@ -68,6 +76,22 @@ async def feishu_webhook(request: Request) -> JSONResponse:
             logger.exception("webhook failed")
         else:
             logger.warning("webhook rejected: %s", detail)
+        return JSONResponse(status_code=status, content={"code": status, "msg": detail})
+
+
+@app.post("/webhook/wechat")
+async def wechat_webhook(request: Request) -> JSONResponse:
+    raw_body = await request.body()
+    try:
+        result = await wechat_handler.handle_webhook(headers=request.headers, raw_body=raw_body)
+        return JSONResponse(content=result)
+    except Exception as exc:
+        status = getattr(exc, "status_code", 500)
+        detail = getattr(exc, "detail", str(exc))
+        if status >= 500:
+            logger.exception("wechat webhook failed")
+        else:
+            logger.warning("wechat webhook rejected: %s", detail)
         return JSONResponse(status_code=status, content={"code": status, "msg": detail})
 
 

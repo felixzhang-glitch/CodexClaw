@@ -2,8 +2,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
-.env
+/.env
+/conf/.env
+/conf/wechat/account.json
 *.log
 *.pid
+logs/
 runtime/
 AGENTS.md

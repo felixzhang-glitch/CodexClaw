@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+CONF_DIR="$ROOT_DIR/conf"
+ENV_FILE="$CONF_DIR/.env"
+ENV_EXAMPLE_FILE="$CONF_DIR/.env.example"
+LOG_DIR="$ROOT_DIR/logs"
+RUNTIME_DIR="$ROOT_DIR/runtime/server"
+CODEX_PID_FILE="$RUNTIME_DIR/codexclaw.pid"
+WECHAT_PID_FILE="$RUNTIME_DIR/wechat-sidecar.pid"
+CODEX_LOG_FILE="$LOG_DIR/codexclaw.log"
+WECHAT_LOG_FILE="$LOG_DIR/wechat-sidecar.log"
+PYTHONPATH_DIR="$ROOT_DIR/lib/python"
+WECHAT_SIDECAR="$ROOT_DIR/lib/js/wechat-sidecar.mjs"
+WECHAT_ACCOUNT_PATH_DEFAULT="$CONF_DIR/wechat/account.json"
+WECHAT_SYNC_BUF_PATH_DEFAULT="$ROOT_DIR/runtime/wechat/get_updates_buf.txt"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ./bin/server start [-f|--foreground]   Start CodexClaw and WeChat sidecar when logged in
+  ./bin/server stop                      Stop CodexClaw and WeChat sidecar
+  ./bin/server restart [-f|--foreground] Restart services
+  ./bin/server status                    Show service status
+  ./bin/server wx login                  Scan QR code to login or refresh WeChat ClawBot
+  ./bin/server wx start                  Start only WeChat sidecar
+  ./bin/server wx stop                   Stop only WeChat sidecar
+  ./bin/server wx status                 Show WeChat sidecar status
+  ./bin/server help                      Show this help
+
+Tips:
+  ./bin/start         -> ./bin/server start
+  ./bin/start -f      -> ./bin/server start -f
+USAGE
+}
+
+ensure_dirs() {
+  mkdir -p "$CONF_DIR" "$LOG_DIR" "$RUNTIME_DIR" "$ROOT_DIR/runtime/wechat"
+}
+
+ensure_env_file() {
+  ensure_dirs
+  if [[ ! -f "$ENV_FILE" ]]; then
+    if [[ -f "$ENV_EXAMPLE_FILE" ]]; then
+      cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
+    else
+      touch "$ENV_FILE"
+    fi
+  fi
+}
+
+load_env() {
+  ensure_env_file
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+  export PYTHONPATH="$PYTHONPATH_DIR${PYTHONPATH:+:$PYTHONPATH}"
+  export WECHAT_ACCOUNT_PATH="${WECHAT_ACCOUNT_PATH:-$WECHAT_ACCOUNT_PATH_DEFAULT}"
+  export WECHAT_SYNC_BUF_PATH="${WECHAT_SYNC_BUF_PATH:-$WECHAT_SYNC_BUF_PATH_DEFAULT}"
+}
+
+read_env_from_file() {
+  local key="$1"
+  grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d'=' -f2- || true
+}
+
+set_env_in_file() {
+  local key="$1"
+  local value="$2"
+  ensure_env_file
+  if grep -qE "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    echo "${key}=${value}" >> "$ENV_FILE"
+  fi
+}
+
+get_effective_value() {
+  local key="$1"
+  if [[ -n "${!key:-}" ]]; then
+    echo "${!key}"
+    return
+  fi
+  read_env_from_file "$key"
+}
+
+ensure_prerequisites() {
+  ensure_env_file
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "[ERROR] 未找到 python3，请先安装 Python 3.10+"
+    exit 1
+  fi
+  if ! command -v codex >/dev/null 2>&1; then
+    echo "[ERROR] 未找到 codex CLI，请先在 root 环境完成 codex 安装与登录。"
+    exit 1
+  fi
+  if [[ ! -d .venv ]]; then
+    python3 -m venv .venv
+  fi
+
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+  python -m pip install --upgrade pip >/dev/null
+  python -m pip install -r conf/requirements.txt >/dev/null
+
+  if [[ -z "$(read_env_from_file CODEX_PERMISSION_MODE)" ]]; then
+    set_env_in_file "CODEX_PERMISSION_MODE" "full"
+  fi
+  if [[ -z "$(read_env_from_file CODEX_WORK_DIR)" ]]; then
+    set_env_in_file "CODEX_WORK_DIR" "./runtime/codex-workdir"
+  fi
+  mkdir -p "$(get_effective_value CODEX_WORK_DIR)"
+}
+
+pid_is_running() {
+  local pid_file="$1"
+  if [[ ! -f "$pid_file" ]]; then
+    return 1
+  fi
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ -z "$pid" || ! "$pid" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  kill -0 "$pid" 2>/dev/null
+}
+
+stop_pid() {
+  local name="$1"
+  local pid_file="$2"
+  if ! pid_is_running "$pid_file"; then
+    rm -f "$pid_file"
+    echo "[INFO] ${name} 未运行"
+    return 0
+  fi
+
+  local pid
+  pid="$(cat "$pid_file")"
+  echo "[INFO] 正在停止 ${name}，PID=$pid"
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$pid_file"
+      echo "[INFO] ${name} 已停止"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "[WARN] ${name} 普通停止超时，执行强制停止"
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$pid_file"
+  echo "[INFO] ${name} 已强制停止"
+}
+
+start_codexclaw() {
+  local foreground="${1:-0}"
+  ensure_dirs
+  ensure_prerequisites
+  load_env
+
+  if pid_is_running "$CODEX_PID_FILE"; then
+    echo "[INFO] CodexClaw 已在运行，PID=$(cat "$CODEX_PID_FILE")"
+    return 0
+  fi
+  rm -f "$CODEX_PID_FILE"
+
+  local host port
+  host="$(get_effective_value SERVER_HOST)"
+  port="$(get_effective_value SERVER_PORT)"
+  [[ -z "$host" ]] && host="0.0.0.0"
+  [[ -z "$port" ]] && port="8080"
+
+  local cmd=(python -m uvicorn app.main:app --host "$host" --port "$port")
+  if [[ "$foreground" == "1" ]]; then
+    start_wechat_sidecar 0 || true
+    echo "[INFO] 前台启动 CodexClaw: ${cmd[*]}"
+    exec "${cmd[@]}"
+  fi
+
+  echo "[INFO] 后台启动 CodexClaw..."
+  setsid nohup "${cmd[@]}" >>"$CODEX_LOG_FILE" 2>&1 < /dev/null &
+  local pid=$!
+  echo "$pid" > "$CODEX_PID_FILE"
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "[INFO] CodexClaw 启动成功，PID=$pid"
+    echo "[INFO] 日志文件: $CODEX_LOG_FILE"
+  else
+    echo "[ERROR] CodexClaw 启动失败，请检查日志: $CODEX_LOG_FILE"
+    tail -n 50 "$CODEX_LOG_FILE" 2>/dev/null || true
+    rm -f "$CODEX_PID_FILE"
+    exit 1
+  fi
+}
+
+start_wechat_sidecar() {
+  local require_login="${1:-0}"
+  ensure_dirs
+  load_env
+  if ! command -v node >/dev/null 2>&1; then
+    echo "[WARN] 未找到 node，跳过 WeChat sidecar"
+    return 0
+  fi
+  if [[ ! -f "$WECHAT_ACCOUNT_PATH" ]]; then
+    if [[ "$require_login" == "1" ]]; then
+      echo "[ERROR] WeChat 未登录，请先执行 ./bin/server wx login"
+      exit 1
+    fi
+    echo "[INFO] WeChat 未登录，跳过 sidecar；需要时执行 ./bin/server wx login"
+    return 0
+  fi
+  if pid_is_running "$WECHAT_PID_FILE"; then
+    echo "[INFO] WeChat sidecar 已在运行，PID=$(cat "$WECHAT_PID_FILE")"
+    return 0
+  fi
+  rm -f "$WECHAT_PID_FILE"
+  echo "[INFO] 后台启动 WeChat sidecar..."
+  setsid nohup node "$WECHAT_SIDECAR" run >>"$WECHAT_LOG_FILE" 2>&1 < /dev/null &
+  local pid=$!
+  echo "$pid" > "$WECHAT_PID_FILE"
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "[INFO] WeChat sidecar 启动成功，PID=$pid"
+    echo "[INFO] 日志文件: $WECHAT_LOG_FILE"
+  else
+    echo "[ERROR] WeChat sidecar 启动失败，请检查日志: $WECHAT_LOG_FILE"
+    tail -n 50 "$WECHAT_LOG_FILE" 2>/dev/null || true
+    rm -f "$WECHAT_PID_FILE"
+    exit 1
+  fi
+}
+
+status_one() {
+  local name="$1"
+  local pid_file="$2"
+  local log_file="$3"
+  if pid_is_running "$pid_file"; then
+    echo "[INFO] ${name} 运行中，PID=$(cat "$pid_file")"
+    echo "[INFO] ${name} 日志: $log_file"
+  else
+    rm -f "$pid_file"
+    echo "[INFO] ${name} 未运行"
+  fi
+}
+
+wechat_login() {
+  ensure_dirs
+  load_env
+  if ! command -v node >/dev/null 2>&1; then
+    echo "[ERROR] 未找到 node，无法执行微信登录"
+    exit 1
+  fi
+  node "$WECHAT_SIDECAR" login
+}
+
+main() {
+  local cmd="${1:-start}"
+  case "$cmd" in
+    start)
+      shift || true
+      local foreground=0
+      if [[ "${1:-}" == "-f" || "${1:-}" == "--foreground" ]]; then
+        foreground=1
+      fi
+      start_codexclaw "$foreground"
+      if [[ "$foreground" != "1" ]]; then
+        start_wechat_sidecar 0 || true
+      fi
+      ;;
+    stop)
+      stop_pid "WeChat sidecar" "$WECHAT_PID_FILE"
+      stop_pid "CodexClaw" "$CODEX_PID_FILE"
+      ;;
+    restart)
+      shift || true
+      local foreground=0
+      if [[ "${1:-}" == "-f" || "${1:-}" == "--foreground" ]]; then
+        foreground=1
+      fi
+      stop_pid "WeChat sidecar" "$WECHAT_PID_FILE"
+      stop_pid "CodexClaw" "$CODEX_PID_FILE"
+      start_codexclaw "$foreground"
+      if [[ "$foreground" != "1" ]]; then
+        start_wechat_sidecar 0 || true
+      fi
+      ;;
+    status)
+      status_one "CodexClaw" "$CODEX_PID_FILE" "$CODEX_LOG_FILE"
+      status_one "WeChat sidecar" "$WECHAT_PID_FILE" "$WECHAT_LOG_FILE"
+      ;;
+    wx)
+      local subcmd="${2:-status}"
+      case "$subcmd" in
+        login)
+          wechat_login
+          ;;
+        start)
+          start_wechat_sidecar 1
+          ;;
+        stop)
+          stop_pid "WeChat sidecar" "$WECHAT_PID_FILE"
+          ;;
+        status)
+          status_one "WeChat sidecar" "$WECHAT_PID_FILE" "$WECHAT_LOG_FILE"
+          ;;
+        *)
+          echo "[ERROR] 未知 wx 命令: $subcmd"
+          usage
+          exit 1
+          ;;
+      esac
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      echo "[ERROR] 未知命令: $cmd"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

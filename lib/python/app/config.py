@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file="conf/.env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     task_running_notice_seconds: float = Field(default=30.0, validation_alias="TASK_RUNNING_NOTICE_SECONDS")
     feishu_message_chunk_chars: int = Field(default=120, validation_alias="FEISHU_MESSAGE_CHUNK_CHARS")
     feishu_stream_flush_seconds: float = Field(default=1.0, validation_alias="FEISHU_STREAM_FLUSH_SECONDS")
+    wechat_webhook_token: str = Field(default="", validation_alias="WECHAT_WEBHOOK_TOKEN")
+    wechat_message_chunk_chars: int = Field(default=1800, validation_alias="WECHAT_MESSAGE_CHUNK_CHARS")
     deduplicate_ttl_seconds: int = Field(default=3600, validation_alias="DEDUPLICATE_TTL_SECONDS")
     reminder_store_path: str = Field(default="./runtime/server/reminders.json", validation_alias="REMINDER_STORE_PATH")
 
