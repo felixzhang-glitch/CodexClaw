@@ -1,6 +1,8 @@
 # CodexClaw (Feishu/WeChat + Codex MVP)
 
 一个单实例可运行服务：接收 Feishu 或 WeChat 私聊文本消息，调用本机 `codex exec`（`full` 权限）处理后回传，支持 streaming 汇总回复。
+<img width="818" height="1456" alt="image" src="https://github.com/user-attachments/assets/4d78591b-1c42-44e9-a772-0c5c38921b5d" />
+
 
 ## 功能覆盖
 
