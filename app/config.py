@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     feishu_group_require_mention: bool = Field(default=True, validation_alias="FEISHU_GROUP_REQUIRE_MENTION")
     feishu_max_retries: int = Field(default=2, validation_alias="FEISHU_MAX_RETRIES")
     feishu_retry_backoff_seconds: float = Field(default=0.5, validation_alias="FEISHU_RETRY_BACKOFF_SECONDS")
+    feishu_received_images_dir: str = Field(
+        default="./runtime/feishu-images",
+        validation_alias="FEISHU_RECEIVED_IMAGES_DIR",
+    )
 
     codex_api_base: str = Field(default="https://api.openai.com/v1", validation_alias="CODEX_API_BASE")
     codex_api_key: str = Field(default="", validation_alias="CODEX_API_KEY")
@@ -78,6 +82,11 @@ class Settings(BaseSettings):
     def feishu_image_upload_url(self) -> str:
         base = self.feishu_api_base.rstrip("/")
         return f"{base}/open-apis/im/v1/images"
+
+    @property
+    def feishu_message_resource_url_template(self) -> str:
+        base = self.feishu_api_base.rstrip("/")
+        return f"{base}/open-apis/im/v1/messages/{{message_id}}/resources/{{file_key}}"
 
     @property
     def feishu_reaction_url_template(self) -> str:

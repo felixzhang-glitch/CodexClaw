@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
+import os
+from pathlib import Path
 import time
 import uuid
 from collections.abc import Mapping
@@ -22,7 +25,7 @@ from channel.feishu.media import (
 from channel.feishu.models import (
     extract_token,
     is_url_verification,
-    parse_text_message_event,
+    parse_message_event,
 )
 from channel.feishu.security import (
     FeishuSecurityError,
@@ -67,7 +70,7 @@ class FeishuWebhookHandler:
             self._verify_token(payload=payload)
             return {"challenge": payload.get("challenge")}
 
-        event = parse_text_message_event(
+        event = parse_message_event(
             payload,
             bot_open_id=self._settings.feishu_bot_open_id,
             group_require_mention=self._settings.feishu_group_require_mention,
@@ -111,7 +114,23 @@ class FeishuWebhookHandler:
             )
             return
 
-        reminder = parse_reminder_command(event.text)
+        try:
+            user_text = await self._build_user_text(event=event, trace_id=trace_id)
+        except FeishuClientError:
+            logger.exception(
+                "failed to download received image",
+                extra={"trace_id": trace_id, "event": "feishu.image_download"},
+            )
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text="图片下载失败，请稍后重试。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-image-download-failed",
+            )
+            return
+
+        reminder = parse_reminder_command(user_text)
         if reminder is not None:
             await self._handle_reminder_command(
                 message_id=event.message_id,
@@ -122,7 +141,7 @@ class FeishuWebhookHandler:
             )
             return
 
-        command = process_command(event.text, session_manager=self._sessions, session_key=session_key)
+        command = process_command(user_text, session_manager=self._sessions, session_key=session_key)
         if command is not None:
             await self._safe_reply(
                 message_id=event.message_id,
@@ -134,7 +153,7 @@ class FeishuWebhookHandler:
             return
 
         history_messages = self._sessions.build_messages(session_key)
-        messages = history_messages + [{"role": "user", "content": event.text}]
+        messages = history_messages + [{"role": "user", "content": user_text}]
         started = self._task_registry.start(
             key=session_key,
             trace_id=trace_id,
@@ -160,7 +179,7 @@ class FeishuWebhookHandler:
         )
         generated_since = time.time()
         delivered_image_paths: list[str] = []
-        auto_complete_on_image = self._looks_like_image_request(event.text)
+        auto_complete_on_image = self._looks_like_image_request(user_text)
         image_watch_task: asyncio.Task[None] | None = None
         if auto_complete_on_image:
             image_watch_task = asyncio.create_task(
@@ -206,7 +225,7 @@ class FeishuWebhookHandler:
                     already_sent_image_paths=delivered_image_paths,
                 )
 
-            self._sessions.append_round(key=session_key, user=event.text, assistant=answer)
+            self._sessions.append_round(key=session_key, user=user_text, assistant=answer)
         except CodexClientCancelled:
             if auto_complete_on_image and delivered_image_paths:
                 logger.info(
@@ -214,7 +233,7 @@ class FeishuWebhookHandler:
                     extra={"trace_id": trace_id, "event": "pipeline.image_auto_complete"},
                 )
                 answer = self._format_generated_image_refs(delivered_image_paths)
-                self._sessions.append_round(key=session_key, user=event.text, assistant=answer)
+                self._sessions.append_round(key=session_key, user=user_text, assistant=answer)
                 return
             logger.info("message cancelled by user", extra={"trace_id": trace_id, "event": "pipeline.cancel"})
             await self._safe_reply(
@@ -356,6 +375,74 @@ class FeishuWebhookHandler:
             trace_id=trace_id,
             request_uuid=f"{message_id}-remind",
         )
+
+    async def _build_user_text(self, event: Any, trace_id: str) -> str:
+        text = str(getattr(event, "text", "") or "").strip()
+        image_keys = self._event_image_keys(event)
+        if not image_keys:
+            return text
+
+        image_paths = []
+        for image_key in image_keys:
+            image_paths.append(
+                await self._download_received_image(
+                    message_id=event.message_id,
+                    image_key=image_key,
+                    trace_id=trace_id,
+                )
+            )
+        image_refs = "\n".join(f"- {image_path}" for image_path in image_paths)
+        if text:
+            return f"{text}\n\n[Feishu images saved locally]\n{image_refs}"
+        return f"用户发送了一张图片。\n\n[Feishu images saved locally]\n{image_refs}"
+
+    @staticmethod
+    def _event_image_keys(event: Any) -> list[str]:
+        seen: set[str] = set()
+        keys: list[str] = []
+        raw_keys = getattr(event, "image_keys", ()) or ()
+        if isinstance(raw_keys, str):
+            raw_keys = (raw_keys,)
+        for raw_key in raw_keys:
+            key = str(raw_key).strip()
+            if key and key not in seen:
+                seen.add(key)
+                keys.append(key)
+
+        image_key = str(getattr(event, "image_key", "") or "").strip()
+        if image_key and image_key not in seen:
+            keys.append(image_key)
+        return keys
+
+    async def _download_received_image(self, message_id: str, image_key: str, trace_id: str) -> str:
+        image_bytes, content_type = await self._feishu_client.download_message_image(
+            message_id=message_id,
+            image_key=image_key,
+            trace_id=trace_id,
+        )
+        suffix = self._image_suffix_from_content_type(content_type)
+        directory = Path(str(getattr(self._settings, "feishu_received_images_dir", "./runtime/feishu-images")))
+        directory.mkdir(parents=True, exist_ok=True)
+        safe_message_id = self._safe_filename_part(message_id)
+        safe_image_key = self._safe_filename_part(image_key)[:32]
+        image_path = directory / f"{safe_message_id}-{safe_image_key}{suffix}"
+        image_path.write_bytes(image_bytes)
+        return os.path.abspath(image_path)
+
+    @staticmethod
+    def _image_suffix_from_content_type(content_type: str) -> str:
+        media_type = content_type.split(";", 1)[0].strip().lower()
+        suffix = mimetypes.guess_extension(media_type) if media_type else None
+        if suffix in {".jpe", ".jpeg"}:
+            return ".jpg"
+        if suffix:
+            return suffix
+        return ".jpg"
+
+    @staticmethod
+    def _safe_filename_part(value: str) -> str:
+        cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value)
+        return cleaned.strip("._") or uuid.uuid4().hex
 
     async def send_chat_text(self, chat_id: str, text: str, trace_id: str, request_uuid: str | None = None) -> None:
         await self._send_chat_text(chat_id=chat_id, text=text, trace_id=trace_id, request_uuid=request_uuid)

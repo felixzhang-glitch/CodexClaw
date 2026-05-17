@@ -22,6 +22,7 @@ class FakeFeishuClient:
         self.fail_reply = False
         self.image_upload_delay_seconds = 0.0
         self.image_upload_started_event: asyncio.Event | None = None
+        self.download_image_calls: list[tuple[str, str]] = []
 
     async def reply_text(
         self,
@@ -81,6 +82,10 @@ class FakeFeishuClient:
         self.image_reply_calls.append((image_key, request_uuid))
         return "om_image"
 
+    async def download_message_image(self, message_id: str, image_key: str, trace_id: str) -> tuple[bytes, str]:
+        self.download_image_calls.append((message_id, image_key))
+        return f"fake received image {image_key}".encode(), "image/png"
+
 
 class FakeCodexClient:
     def __init__(self) -> None:
@@ -96,6 +101,16 @@ class FakeCodexClient:
     def cancel(self, trace_id: str) -> bool:
         self.cancelled = True
         return True
+
+
+class RecordingCodexClient(FakeCodexClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.messages: list[dict[str, str]] = []
+
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+        self.messages = messages
+        yield "收到图片"
 
 
 class ImageCodexClient(FakeCodexClient):
@@ -181,6 +196,86 @@ async def test_handle_text_event_quick_ack_and_single_final_reply() -> None:
     assert feishu_client.reaction_calls == ["Typing"]
     assert len(feishu_client.reply_calls) == 1
     assert feishu_client.reply_calls[0][0] == "你好"
+
+
+@pytest.mark.asyncio
+async def test_handle_image_event_downloads_image_and_passes_local_path_to_codex(tmp_path) -> None:
+    settings = SimpleNamespace(
+        streaming_enabled=True,
+        task_running_notice_seconds=30.0,
+        feishu_encrypt_key="",
+        feishu_verification_token="",
+        feishu_received_images_dir=str(tmp_path / "received"),
+    )
+    feishu_client = FakeFeishuClient()
+    codex_client = RecordingCodexClient()
+    handler = FeishuWebhookHandler(
+        settings=settings,
+        feishu_client=feishu_client,
+        codex_client=codex_client,
+        session_manager=SessionManager(max_history_rounds=10),
+        deduplicator=MessageDeduplicator(ttl_seconds=3600),
+        task_registry=ActiveTaskRegistry(),
+    )
+
+    event = SimpleNamespace(
+        message_id="om_image_1",
+        user_id="ou_test_1",
+        chat_id="oc_test_1",
+        text="用户发送了一张图片。",
+        message_type="image",
+        image_key="img_v2_test",
+    )
+
+    await handler._handle_text_event(event=event, trace_id="trace_test")
+
+    assert feishu_client.download_image_calls == [("om_image_1", "img_v2_test")]
+    image_files = list((tmp_path / "received").glob("*.png"))
+    assert len(image_files) == 1
+    assert image_files[0].read_bytes() == b"fake received image img_v2_test"
+    assert str(image_files[0]) in codex_client.messages[-1]["content"]
+    assert feishu_client.reply_calls[-1][0] == "收到图片"
+
+
+@pytest.mark.asyncio
+async def test_handle_post_event_downloads_all_images_and_keeps_text(tmp_path) -> None:
+    settings = SimpleNamespace(
+        streaming_enabled=True,
+        task_running_notice_seconds=30.0,
+        feishu_encrypt_key="",
+        feishu_verification_token="",
+        feishu_received_images_dir=str(tmp_path / "received"),
+    )
+    feishu_client = FakeFeishuClient()
+    codex_client = RecordingCodexClient()
+    handler = FeishuWebhookHandler(
+        settings=settings,
+        feishu_client=feishu_client,
+        codex_client=codex_client,
+        session_manager=SessionManager(max_history_rounds=10),
+        deduplicator=MessageDeduplicator(ttl_seconds=3600),
+        task_registry=ActiveTaskRegistry(),
+    )
+
+    event = SimpleNamespace(
+        message_id="om_post_1",
+        user_id="ou_test_1",
+        chat_id="oc_test_1",
+        text="记录午餐",
+        message_type="post",
+        image_key="img_v2_a",
+        image_keys=("img_v2_a", "img_v2_b"),
+    )
+
+    await handler._handle_text_event(event=event, trace_id="trace_test")
+
+    assert feishu_client.download_image_calls == [("om_post_1", "img_v2_a"), ("om_post_1", "img_v2_b")]
+    image_files = sorted((tmp_path / "received").glob("*.png"))
+    assert len(image_files) == 2
+    prompt = codex_client.messages[-1]["content"]
+    assert "记录午餐" in prompt
+    assert str(image_files[0]) in prompt
+    assert str(image_files[1]) in prompt
 
 
 class BlockingCodexClient:

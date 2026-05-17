@@ -265,6 +265,22 @@ class FeishuClient:
         )
         return image_key
 
+    async def download_message_image(self, message_id: str, image_key: str, trace_id: str) -> tuple[bytes, str]:
+        if not message_id or not image_key:
+            raise FeishuClientError("message_id and image_key are required")
+
+        url = self._settings.feishu_message_resource_url_template.format(
+            message_id=message_id,
+            file_key=image_key,
+        )
+        response, content_type = await self._get_authenticated_bytes(
+            url=url,
+            params={"type": "image"},
+            trace_id=trace_id,
+            event="feishu.download_image",
+        )
+        return response.content, content_type
+
     async def create_reaction(
         self,
         message_id: str,
@@ -472,6 +488,62 @@ class FeishuClient:
 
         raise FeishuClientError(f"feishu request failed: {last_error}")
 
+    async def _get_authenticated_bytes(
+        self,
+        url: str,
+        params: dict[str, str],
+        trace_id: str,
+        event: str,
+    ) -> tuple[httpx.Response, str]:
+        attempts = self._retry_attempts()
+        last_error: Exception | None = None
+
+        for attempt in range(attempts + 1):
+            token = await self._get_tenant_access_token(trace_id=trace_id)
+            try:
+                response = await self._client.get(
+                    url,
+                    params=params,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            except httpx.RequestError as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    raise FeishuClientError(f"feishu request failed: {exc}") from exc
+                await self._sleep_before_retry(attempt)
+                continue
+
+            content_type = response.headers.get("content-type", "")
+            if response.status_code < 400 and not content_type.startswith("application/json"):
+                logger.info(
+                    "feishu resource downloaded",
+                    extra={"trace_id": trace_id, "event": event, "status_code": response.status_code},
+                )
+                return response, content_type
+
+            data = self._try_parse_json(response)
+            if response.status_code == 401:
+                self._clear_tenant_access_token()
+                if attempt < attempts:
+                    await self._sleep_before_retry(attempt)
+                    continue
+
+            if attempt >= attempts or not self._is_retryable_response(response=response, data=data):
+                logger.error(
+                    "feishu resource download failed",
+                    extra={
+                        "trace_id": trace_id,
+                        "event": event,
+                        "status_code": response.status_code,
+                        "error_code": data.get("code"),
+                    },
+                )
+                raise FeishuClientError(f"feishu resource download failed: {data or response.status_code}")
+
+            await self._sleep_before_retry(attempt)
+
+        raise FeishuClientError(f"feishu request failed: {last_error}")
+
     async def _post_json_with_retries(
         self,
         url: str,
@@ -553,3 +625,13 @@ class FeishuClient:
             return response.json()
         except json.JSONDecodeError as exc:
             raise FeishuClientError(f"invalid feishu response status={response.status_code}") from exc
+
+    @staticmethod
+    def _try_parse_json(response: httpx.Response) -> dict[str, Any]:
+        try:
+            data = response.json()
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+        return {}

@@ -13,6 +13,9 @@ class FeishuTextMessageEvent:
     user_id: str
     text: str
     chat_type: str
+    message_type: str = "text"
+    image_key: str = ""
+    image_keys: tuple[str, ...] = ()
 
 
 def is_url_verification(payload: dict[str, Any]) -> bool:
@@ -35,6 +38,21 @@ def parse_text_message_event(
     bot_open_id: str = "",
     group_require_mention: bool = True,
 ) -> FeishuTextMessageEvent | None:
+    event = parse_message_event(
+        payload=payload,
+        bot_open_id=bot_open_id,
+        group_require_mention=group_require_mention,
+    )
+    if event is None or event.message_type != "text":
+        return None
+    return event
+
+
+def parse_message_event(
+    payload: dict[str, Any],
+    bot_open_id: str = "",
+    group_require_mention: bool = True,
+) -> FeishuTextMessageEvent | None:
     header = payload.get("header") or {}
     if header.get("event_type") != "im.message.receive_v1":
         return None
@@ -47,7 +65,8 @@ def parse_text_message_event(
     if not isinstance(message, dict):
         return None
 
-    if message.get("message_type") != "text":
+    message_type = str(message.get("message_type", "")).strip()
+    if message_type not in {"text", "image", "post"}:
         return None
 
     chat_type = str(message.get("chat_type", "")).strip()
@@ -63,17 +82,36 @@ def parse_text_message_event(
     except json.JSONDecodeError:
         return None
 
-    text = str(content.get("text", "")).strip()
-    if not text:
-        return None
+    text = ""
+    image_key = ""
+    image_keys: tuple[str, ...] = ()
+    if message_type == "text":
+        text = str(content.get("text", "")).strip()
+        if not text:
+            return None
+    elif message_type == "image":
+        image_key = str(content.get("image_key", "")).strip()
+        if not image_key:
+            return None
+        image_keys = (image_key,)
+        text = "用户发送了一张图片。"
+    else:
+        text = _extract_post_text(content)
+        image_keys = tuple(_extract_post_image_keys(content))
+        image_key = image_keys[0] if image_keys else ""
+        if not text and not image_keys:
+            return None
+        if not text:
+            text = "用户发送了一张图片。"
 
     if chat_type != "p2p":
         mention_keys = _matching_mention_keys(message=message, bot_open_id=bot_open_id)
         if group_require_mention and not mention_keys:
             return None
-        text = _strip_mention_keys(text=text, mention_keys=mention_keys)
+        if text:
+            text = _strip_mention_keys(text=text, mention_keys=mention_keys)
         if not text:
-            return None
+            text = "用户发送了一张图片。"
 
     sender = event.get("sender") or {}
     sender_id = sender.get("sender_id") or {}
@@ -95,7 +133,62 @@ def parse_text_message_event(
         user_id=str(user_id),
         text=text,
         chat_type=chat_type,
+        message_type=message_type,
+        image_key=image_key,
+        image_keys=image_keys,
     )
+
+
+def _extract_post_text(content: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for element in _iter_post_elements(content):
+        tag = str(element.get("tag", "")).strip()
+        if tag in {"text", "a", "at"}:
+            text = str(element.get("text", "") or element.get("name", "")).strip()
+            if text:
+                parts.append(text)
+    return " ".join(" ".join(parts).split())
+
+
+def _extract_post_image_keys(content: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    seen: set[str] = set()
+    for element in _iter_post_elements(content):
+        if str(element.get("tag", "")).strip() not in {"img", "image"}:
+            continue
+        key = str(element.get("image_key", "") or element.get("file_key", "")).strip()
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
+    return keys
+
+
+def _iter_post_elements(content: dict[str, Any]) -> list[dict[str, Any]]:
+    root: Any = content
+    if isinstance(content.get("post"), dict):
+        post = content["post"]
+        if isinstance(post.get("zh_cn"), dict):
+            root = post["zh_cn"]
+        elif isinstance(post.get("en_us"), dict):
+            root = post["en_us"]
+        else:
+            root = post
+
+    blocks = root.get("content") if isinstance(root, dict) else None
+    if not isinstance(blocks, list):
+        return []
+
+    elements: list[dict[str, Any]] = []
+    for block in blocks:
+        if isinstance(block, dict):
+            elements.append(block)
+            continue
+        if not isinstance(block, list):
+            continue
+        for element in block:
+            if isinstance(element, dict):
+                elements.append(element)
+    return elements
 
 
 def _matching_mention_keys(message: dict[str, Any], bot_open_id: str = "") -> list[str]:

@@ -8,6 +8,7 @@
 - URL challenge 校验
 - 签名校验（配置 `FEISHU_ENCRYPT_KEY` 后启用）
 - 私聊文本消息处理（`im.message.receive_v1`）
+- 私聊图片消息处理：自动下载飞书用户发来的图片并把本地路径交给 Codex
 - 群聊 @ 机器人触发处理（默认要求 @）
 - 消息去重（`message_id`）
 - Codex 统一客户端（超时、重试、错误处理、结构化日志）
@@ -102,7 +103,7 @@ https://<你的公网域名>/webhook/feishu
 ```
 
 2. 订阅事件：`im.message.receive_v1`
-3. 给应用开通机器人发消息权限（读取、回复、主动发送 IM 文本和图片、上传图片）
+3. 给应用开通机器人发消息权限（读取、回复、主动发送 IM 文本和图片、上传图片、获取消息资源）
 4. 在应用可用范围内允许私聊机器人
 
 说明：
@@ -131,6 +132,7 @@ https://<你的公网域名>/webhook/feishu
 - `FEISHU_GROUP_REQUIRE_MENTION=true`
 - `FEISHU_MAX_RETRIES=2`
 - `FEISHU_RETRY_BACKOFF_SECONDS=0.5`
+- `FEISHU_RECEIVED_IMAGES_DIR=./runtime/feishu-images`
 - `CODEX_CLI_BIN=codex`
 - `CODEX_WORK_DIR=./runtime/codex-workdir`
 - `CODEX_MODEL`（可空，留空时使用 codex CLI 默认模型）
