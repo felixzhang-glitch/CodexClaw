@@ -1,6 +1,6 @@
-# CodexClaw (Feishu/WeChat + Codex MVP)
+# CodexClaw (Feishu/WeChat + Multi-Backend)
 
-一个单实例可运行服务：接收 Feishu 或 WeChat 私聊文本消息，调用本机 `codex exec`（`full` 权限）处理后回传，支持 streaming 汇总回复。
+一个单实例可运行服务：接收 Feishu 或 WeChat 私聊文本消息，调用本机 CLI 后端（`codex`、`claude`、`qodercli`）处理后回传，支持 streaming 汇总回复和运行时全局后端切换。
 
 <img width="818" height="1456" alt="image" src="https://github.com/user-attachments/assets/4d78591b-1c42-44e9-a772-0c5c38921b5d" />
 
@@ -16,6 +16,8 @@
 - 群聊 @ 机器人触发处理（默认要求 @）
 - 消息去重（`message_id`）
 - Codex 统一客户端（超时、重试、错误处理、结构化日志）
+- 多后端路由：支持 `codex`、`claude`、`qodercli` 三个 CLI 后端，运行时通过命令切换
+- 后端状态持久化：切换后重启保留选择（`runtime/server/backend.json`）
 - streaming 增量回传 Feishu
 - 收到消息后先快速回执：消息 reaction（`emoji_type=Typing`）
 - 最终答案默认单条回复（避免分段刷屏）
@@ -39,12 +41,15 @@ conf/
   .env.example
 lib/python/
   app/
-  config.py
-  commands.py
-  logging.py
-  main.py
+    config.py
+    commands.py
+    logging.py
+    main.py
   channel/feishu/
   channel/wechat/
+  core/agent/
+    router.py
+    claude_cli.py
   core/codex/
   core/session/
 lib/js/
@@ -150,7 +155,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - CodexClaw: `http://127.0.0.1:8080/webhook/wechat`
 - sidecar health: `http://127.0.0.1:8787/healthz`
 
-当前 WeChat 版本先支持私聊文本、语音转文字文本、`/new`、`/reset`、`/compact`、`/help`、`/stop`。图片、文件、typing 和定时提醒后续再补。
+当前 WeChat 版本先支持私聊文本、语音转文字文本、`/new`、`/reset`、`/compact`、`/help`、`/stop`、`/backend`、`/codex`、`/claude`、`/qodercli`。图片、文件、typing 和定时提醒后续再补。
 
 ## 命令说明
 
@@ -159,7 +164,11 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - `/reset`：清空当前会话历史
 - `/compact`：压缩当前会话上下文，保留最近 2 轮；`/compress` 同义
 - `/stop`：终止当前会话中正在运行的任务
-- `/remind 10m 喝水`：10 分钟后主动发送“喝水”；时间单位支持 `s/m/h/d`
+- `/backend`：查看当前后端及可切换列表
+- `/codex`：切换后端为 Codex CLI
+- `/claude`：切换后端为 Claude Code
+- `/qodercli`：切换后端为 Qoder CLI
+- `/remind 10m 喝水`：10 分钟后主动发送”喝水”；时间单位支持 `s/m/h/d`
 
 ## 配置项
 
@@ -182,6 +191,14 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - `CODEX_STREAM_READ_LIMIT_BYTES=262144`
 - `CODEX_CIRCUIT_BREAKER_THRESHOLD=5`
 - `CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS=30`
+- `ACTIVE_BACKEND=codex`（默认后端，可选 `codex`/`claude`/`qodercli`）
+- `BACKEND_STATE_PATH=./runtime/server/backend.json`
+- `CLAUDE_CLI_BIN=claude`
+- `CLAUDE_MODEL`（可空）
+- `CLAUDE_PERMISSION_MODE=auto`（root 下 claude 不支持 bypass，`auto` 为最大权限模式）
+- `QODERCLI_CLI_BIN=qodercli`
+- `QODERCLI_MODEL`（可空）
+- `QODERCLI_PERMISSION_MODE=dangerously-skip-permissions`
 - `MAX_HISTORY_ROUNDS=10`
 - `STREAMING_ENABLED=true`
 - `TASK_RUNNING_NOTICE_SECONDS=30`

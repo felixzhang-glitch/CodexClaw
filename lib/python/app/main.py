@@ -10,7 +10,7 @@ from app.logging import setup_logging
 from channel.feishu.client import FeishuClient
 from channel.feishu.handler import FeishuWebhookHandler
 from channel.wechat.handler import WeChatWebhookHandler
-from core.codex.client import CodexClient
+from core.agent.router import AgentRouter
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
 from core.session.reminder_scheduler import ReminderScheduler
@@ -25,7 +25,7 @@ app = FastAPI(title="CodexClaw", version="0.1.0")
 session_manager = SessionManager(max_history_rounds=settings.max_history_rounds)
 deduplicator = MessageDeduplicator(ttl_seconds=settings.deduplicate_ttl_seconds)
 task_registry = ActiveTaskRegistry()
-codex_client = CodexClient(settings=settings)
+codex_client = AgentRouter(settings=settings)
 feishu_client = FeishuClient(settings=settings)
 
 

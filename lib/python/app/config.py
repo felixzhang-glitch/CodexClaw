@@ -48,6 +48,15 @@ class Settings(BaseSettings):
         validation_alias="CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
     )
 
+    active_backend: str = Field(default="codex", validation_alias="ACTIVE_BACKEND")
+    backend_state_path: str = Field(default="./runtime/server/backend.json", validation_alias="BACKEND_STATE_PATH")
+    claude_cli_bin: str = Field(default="claude", validation_alias="CLAUDE_CLI_BIN")
+    claude_model: str = Field(default="", validation_alias="CLAUDE_MODEL")
+    claude_permission_mode: str = Field(default="auto", validation_alias="CLAUDE_PERMISSION_MODE")
+    qodercli_cli_bin: str = Field(default="qodercli", validation_alias="QODERCLI_CLI_BIN")
+    qodercli_model: str = Field(default="", validation_alias="QODERCLI_MODEL")
+    qodercli_permission_mode: str = Field(default="dangerously-skip-permissions", validation_alias="QODERCLI_PERMISSION_MODE")
+
     max_history_rounds: int = Field(default=10, validation_alias="MAX_HISTORY_ROUNDS")
     streaming_enabled: bool = Field(default=True, validation_alias="STREAMING_ENABLED")
     task_running_notice_seconds: float = Field(default=30.0, validation_alias="TASK_RUNNING_NOTICE_SECONDS")

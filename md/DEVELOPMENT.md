@@ -4,23 +4,26 @@
 
 ## 1. 项目定位
 
-CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
+CodexClaw 是一个 Feishu/WeChat 私聊机器人后端服务，核心职责：
 
-1. 接收 Feishu 事件回调。
+1. 接收 Feishu/WeChat 事件回调。
 2. 解析/校验消息并维护会话上下文。
-3. 调用本机 `codex exec`（默认 `full` 权限）生成答案。
-4. 将结果回传 Feishu。
+3. 调用本机 CLI 后端（`codex`、`claude`、`qodercli`，运行时可切换）生成答案。
+4. 将结果回传渠道。
 
 当前实现特性：
 
 - 单实例服务（FastAPI + Uvicorn）
 - Feishu 文本消息闭环
+- WeChat 文本消息闭环（通过 sidecar 长轮询 iLink Bot API）
 - 群聊 @ 机器人触发处理
+- 多后端路由：`codex`、`claude`、`qodercli`，通过 `/codex`、`/claude`、`/qodercli` 命令全局切换
+- 后端状态持久化（`runtime/server/backend.json`），重启保留选择
 - 会话记忆（默认 10 轮 FIFO）
-- `/help`、`/new`、`/reset`、`/compact`、`/stop`
+- `/help`、`/new`、`/reset`、`/compact`、`/stop`、`/backend`
 - `/remind <时间> <内容>` 定时提醒，时间单位支持 `s/m/h/d`
 - 快速回执（reaction: `emoji_type=Typing`）
-- 长任务通知（默认 30 秒后提示“仍在运行中”）
+- 长任务通知（默认 30 秒后提示”仍在运行中”）
 - 普通 reply 失败后，按 `chat_id` 主动发送兜底
 - 飞书 OpenAPI transient failure 重试
 - 飞书长文本智能分段，尽量保留段落和代码块完整性
@@ -37,7 +40,7 @@ CodexClaw 是一个 Feishu 私聊机器人后端服务，核心职责：
 lib/python/app/
   config.py          # 环境变量与配置
   logging.py         # JSON 结构化日志
-  commands.py        # /help /new /reset /stop
+  commands.py        # /help /new /reset /stop /backend /codex /claude /qodercli
   main.py            # FastAPI 入口
 
 lib/python/channel/feishu/
@@ -45,6 +48,13 @@ lib/python/channel/feishu/
   security.py        # 签名校验与解密
   client.py          # Feishu OpenAPI 调用（reply/reaction/token）
   handler.py         # Feishu webhook 主处理流程
+
+lib/python/channel/wechat/
+  handler.py         # WeChat webhook 处理流程
+
+lib/python/core/agent/
+  router.py          # 多后端路由（codex/claude/qodercli），运行时切换 + 持久化
+  claude_cli.py      # Claude Code 族 CLI 客户端（claude / qodercli）
 
 lib/python/core/codex/
   client.py          # 本机 codex CLI 调用封装（超时/重试/熔断）
@@ -237,7 +247,71 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 ---
 
-## 7. 会话与记忆
+## 7. 多后端路由
+
+文件：`lib/python/core/agent/router.py`、`lib/python/core/agent/claude_cli.py`
+
+### 7.1 架构
+
+`AgentRouter` 持有三个后端客户端实例（`codex`、`claude`、`qodercli`），对外暴露与 `CodexClient` 相同的接口（`chat`、`chat_stream`、`cancel`、`close`），作为 drop-in 替换注入两个 handler。
+
+- `chat` / `chat_stream`：转发到当前活跃后端
+- `cancel`：广播到所有后端（保证 `/stop` 始终有效，无论哪个后端在运行）
+- `switch(name)`：切换活跃后端并持久化
+
+### 7.2 持久化
+
+切换后写入 `runtime/server/backend.json`（原子写：先写 `.tmp` 再 `os.replace`）。启动时从该文件加载；若文件不存在则使用 `ACTIVE_BACKEND` 环境变量默认值。
+
+### 7.3 命令
+
+- `/backend`：显示当前后端和可选列表
+- `/codex`、`/claude`、`/qodercli`：切换全局后端
+
+命令在 `commands.py:process_command` 中处理，需传入 `router` 参数（两个 handler 均已适配）。
+
+### 7.4 Claude Code 族 CLI 适配
+
+`ClaudeCliClient`（`claude_cli.py`）同时服务 `claude` 和 `qodercli`，因为二者是同族 CLI（相同 output-format）。
+
+**调用方式：**
+
+- 非流式：`<bin> -p --output-format json --add-dir <work_dir> [--model X] [perms] <prompt>`
+- 流式：`<bin> -p --output-format stream-json [--include-partial-messages] [--verbose] --add-dir <work_dir> [--model X] [perms] <prompt>`
+
+**输出解析：**
+
+- 非流式：最终 JSON 中 `type=result` + `is_error=false` 的 `.result` 字段
+- 流式增量：`type=stream_event` → `event.type=content_block_delta` → `delta.type=text_delta` → `.text`
+- 流式完整块（qodercli 无增量）：`type=assistant` → `message.content[].type=text` → `.text`
+- 错误：`type=result` + `is_error=true`，或非零退出码
+
+**权限模式差异：**
+
+| CLI | Root 下可用的最大权限模式 |
+|-----|------------------------|
+| codex | `--dangerously-bypass-approvals-and-sandbox`（内置） |
+| claude | `--permission-mode auto`（`--dangerously-skip-permissions` 被 root 拒绝） |
+| qodercli | `--dangerously-skip-permissions` |
+
+**qodercli 不支持的 flag：** `--verbose`、`--include-partial-messages`（通过 `use_verbose=False, use_partial_messages=False` 禁用）。
+
+### 7.5 配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ACTIVE_BACKEND` | `codex` | 初始后端 |
+| `BACKEND_STATE_PATH` | `./runtime/server/backend.json` | 持久化文件 |
+| `CLAUDE_CLI_BIN` | `claude` | claude 二进制路径 |
+| `CLAUDE_MODEL` | （空） | claude 模型 |
+| `CLAUDE_PERMISSION_MODE` | `auto` | claude 权限模式 |
+| `QODERCLI_CLI_BIN` | `qodercli` | qodercli 二进制路径 |
+| `QODERCLI_MODEL` | （空） | qodercli 模型 |
+| `QODERCLI_PERMISSION_MODE` | `dangerously-skip-permissions` | qodercli 权限模式 |
+
+---
+
+## 8. 会话与记忆
 
 文件：`lib/python/core/session/manager.py`
 
@@ -255,7 +329,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 ---
 
-## 8. Feishu 客户端能力
+## 9. Feishu 客户端能力
 
 文件：`lib/python/channel/feishu/client.py`
 
@@ -268,7 +342,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 ---
 
-## 9. 测试说明
+## 10. 测试说明
 
 运行：
 
@@ -291,9 +365,9 @@ pytest -c conf/pytest.ini -q
 
 ---
 
-## 10. 常见问题排查
+## 11. 常见问题排查
 
-### 10.1 Feishu 401
+### 11.1 Feishu 401
 
 重点检查：
 
@@ -301,14 +375,14 @@ pytest -c conf/pytest.ini -q
 - `FEISHU_VERIFICATION_TOKEN` 是否一致
 - 回调 URL 是否正确可达
 
-### 10.2 启动失败 address already in use
+### 11.2 启动失败 address already in use
 
 端口被占用：
 
 - 换端口启动：`SERVER_PORT=18080 ./bin/start`
 - 或先停掉旧进程
 
-### 10.3 收到“服务繁忙，请稍后重试”
+### 11.3 收到”服务繁忙，请稍后重试”
 
 查看两类日志：
 
@@ -335,7 +409,7 @@ pytest -c conf/pytest.ini -q
 - 再确认 `TASK_RUNNING_NOTICE_SECONDS` 是否符合预期
 - 如果日志里出现 `chunk is longer than limit`，需要提高 `CODEX_STREAM_READ_LIMIT_BYTES`
 
-### 10.4 `/stop` 没有终止任务
+### 11.4 `/stop` 没有终止任务
 
 优先检查：
 
@@ -350,7 +424,7 @@ pytest -c conf/pytest.ini -q
 
 ---
 
-## 11. 后续二开建议
+## 12. 后续二开建议
 
 1. 增加持久化存储（Redis/DB）替换内存会话与去重。
 2. 支持群聊和 @ 提及策略。

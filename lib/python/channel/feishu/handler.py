@@ -141,7 +141,12 @@ class FeishuWebhookHandler:
             )
             return
 
-        command = process_command(user_text, session_manager=self._sessions, session_key=session_key)
+        command = process_command(
+            user_text,
+            session_manager=self._sessions,
+            session_key=session_key,
+            router=self._codex_client,
+        )
         if command is not None:
             await self._safe_reply(
                 message_id=event.message_id,

@@ -120,3 +120,37 @@ def _split_by_sentence_or_hard(text: str, limit: int) -> list[str]:
     if current.strip():
         pieces.append(current.strip())
     return pieces
+
+
+def strip_markdown(text: str) -> str:
+    """Convert markdown to readable plaintext for channels that don't render it."""
+    if not text:
+        return ""
+
+    lines = text.splitlines()
+    output: list[str] = []
+    in_fence = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            output.append(line)
+            continue
+        line = re.sub(r"^(#{1,6})\s+", "", line)
+        line = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", line)
+        line = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", line)
+        line = re.sub(r"\*\*\*(.+?)\*\*\*", r"\1", line)
+        line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+        line = re.sub(r"__(.+?)__", r"\1", line)
+        line = re.sub(r"\*(.+?)\*", r"\1", line)
+        line = re.sub(r"_(.+?)_", r"\1", line)
+        line = re.sub(r"~~(.+?)~~", r"\1", line)
+        line = re.sub(r"`([^`]+)`", r"\1", line)
+        if re.match(r"^[-*_]{3,}\s*$", stripped):
+            line = "---"
+        output.append(line)
+
+    return "\n".join(output)

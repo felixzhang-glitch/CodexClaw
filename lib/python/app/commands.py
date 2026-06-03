@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from core.session.manager import SessionManager
 
@@ -12,8 +13,18 @@ HELP_TEXT = (
     "/reset - 清空当前会话上下文\n"
     "/compact - 压缩当前会话上下文（保留最近 2 轮）\n"
     "/stop - 终止当前正在运行的任务\n"
+    "/backend - 查看当前后端及可切换列表\n"
+    "/codex - 切换后端为 Codex CLI\n"
+    "/claude - 切换后端为 Claude Code\n"
+    "/qodercli - 切换后端为 Qoder CLI\n"
     "/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）"
 )
+
+BACKEND_COMMANDS: dict[str, str] = {
+    "/codex": "codex",
+    "/claude": "claude",
+    "/qodercli": "qodercli",
+}
 
 
 @dataclass(slots=True)
@@ -28,7 +39,12 @@ class ReminderCommand:
     text: str
 
 
-def process_command(raw_text: str, session_manager: SessionManager, session_key: str) -> CommandResult | None:
+def process_command(
+    raw_text: str,
+    session_manager: SessionManager,
+    session_key: str,
+    router: Any | None = None,
+) -> CommandResult | None:
     text = raw_text.strip().lower()
 
     if text == "/help":
@@ -48,7 +64,25 @@ def process_command(raw_text: str, session_manager: SessionManager, session_key:
             return CommandResult(handled=True, reply_text="当前会话上下文较短，无需压缩。")
         return CommandResult(handled=True, reply_text=f"已压缩当前会话上下文: {before} 轮 -> {after} 轮。")
 
+    if router is not None:
+        if text == "/backend":
+            current = router.active
+            options = "、".join(f"{name}（{router.label(name)}）" for name in router.available())
+            return CommandResult(
+                handled=True,
+                reply_text=f"当前后端: {current}（{router.label(current)}）\n可切换: {options}",
+            )
+
+        if text in BACKEND_COMMANDS:
+            target = BACKEND_COMMANDS[text]
+            if router.active == target:
+                return CommandResult(handled=True, reply_text=f"当前已是 {target}（{router.label(target)}）后端。")
+            if router.switch(target):
+                return CommandResult(handled=True, reply_text=f"已切换后端为 {target}（{router.label(target)}）。")
+            return CommandResult(handled=True, reply_text=f"切换失败: 未知后端 {target}。")
+
     return None
+
 
 
 def parse_reminder_command(raw_text: str) -> ReminderCommand | None:

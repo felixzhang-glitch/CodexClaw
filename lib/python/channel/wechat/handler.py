@@ -25,7 +25,11 @@ WECHAT_HELP_TEXT = (
     "/new - 新建会话（不继承历史）\n"
     "/reset - 清空当前会话上下文\n"
     "/compact - 压缩当前会话上下文（保留最近 2 轮）\n"
-    "/stop - 终止当前正在运行的任务"
+    "/stop - 终止当前正在运行的任务\n"
+    "/backend - 查看当前后端及可切换列表\n"
+    "/codex - 切换后端为 Codex CLI\n"
+    "/claude - 切换后端为 Claude Code\n"
+    "/qodercli - 切换后端为 Qoder CLI"
 )
 
 
@@ -87,7 +91,12 @@ class WeChatWebhookHandler:
         if active_task is not None:
             return self._split_reply("当前已有任务在运行中。发送 /stop 可强制终止后再试。")
 
-        command = process_command(event.text, session_manager=self._sessions, session_key=session_key)
+        command = process_command(
+            event.text,
+            session_manager=self._sessions,
+            session_key=session_key,
+            router=self._codex_client,
+        )
         if command is not None:
             return self._split_reply(command.reply_text)
 
