@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from core.agent.claude_cli import ClaudeCliClient
 
 
@@ -85,3 +87,21 @@ description: "飞书即时通讯：收发消息和管理群聊。"
 
     assert name == "lark-im"
     assert description == "飞书即时通讯：收发消息和管理群聊。"
+
+
+@pytest.mark.asyncio
+async def test_readline_before_deadline_times_out(tmp_path) -> None:
+    import asyncio
+    import time
+
+    client = ClaudeCliClient(
+        settings=make_settings(tmp_path),
+        name="claude",
+        bin_path="claude",
+        model="",
+        permission_mode="auto",
+    )
+    reader = asyncio.StreamReader()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await client._readline_before_deadline(reader, deadline=time.monotonic() - 1)
