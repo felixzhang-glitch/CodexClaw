@@ -2,6 +2,24 @@ from app.commands import parse_reminder_command, process_command
 from core.session.manager import SessionManager
 
 
+class FakeRouter:
+    def __init__(self, active: str = "codex") -> None:
+        self.active = active
+
+    def available(self) -> list[str]:
+        return ["codex", "claude", "qodercli"]
+
+    @staticmethod
+    def label(name: str) -> str:
+        return name
+
+    def switch(self, name: str) -> bool:
+        if name not in self.available():
+            return False
+        self.active = name
+        return True
+
+
 def test_new_command_starts_fresh_session() -> None:
     manager = SessionManager(max_history_rounds=10)
     key = SessionManager.build_key("u1", "c1")
@@ -40,3 +58,27 @@ def test_compact_command_compresses_session_history() -> None:
     messages = manager.build_messages(key)
     assert "已压缩的历史上下文摘要" in messages[1]["content"]
     assert messages[-2]["content"] == "question 4"
+
+
+def test_backend_switch_resets_current_session_history() -> None:
+    manager = SessionManager(max_history_rounds=10)
+    key = SessionManager.build_key("u1", "c1")
+    manager.append_round(key, "列出所有 skills", "Qoder skills")
+
+    result = process_command("/claude", manager, key, router=FakeRouter(active="qodercli"))
+
+    assert result is not None
+    assert "已切换后端为 claude" in result.reply_text
+    assert manager.round_count(key) == 0
+
+
+def test_backend_switch_noop_keeps_current_session_history() -> None:
+    manager = SessionManager(max_history_rounds=10)
+    key = SessionManager.build_key("u1", "c1")
+    manager.append_round(key, "hello", "world")
+
+    result = process_command("/claude", manager, key, router=FakeRouter(active="claude"))
+
+    assert result is not None
+    assert "当前已是 claude" in result.reply_text
+    assert manager.round_count(key) == 1

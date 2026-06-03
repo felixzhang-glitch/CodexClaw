@@ -53,7 +53,7 @@ class ClaudeCliClient:
         self._active_processes: dict[str, asyncio.subprocess.Process] = {}
         self._cancel_requests: set[str] = set()
 
-        self._work_dir = os.path.abspath(settings.codex_work_dir)
+        self._work_dir = os.path.abspath(os.path.join(settings.codex_work_dir, self._name))
         os.makedirs(self._work_dir, exist_ok=True)
 
     @property

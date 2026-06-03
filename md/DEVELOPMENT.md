@@ -259,6 +259,8 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 - `cancel`：广播到所有后端（保证 `/stop` 始终有效，无论哪个后端在运行）
 - `switch(name)`：切换活跃后端并持久化
 
+`claude` 与 `qodercli` 会分别使用 `CODEX_WORK_DIR` 下的 `claude/`、`qodercli/` 子目录，避免两类 Claude Code-family CLI 共享本地工具状态。
+
 ### 7.2 持久化
 
 切换后写入 `runtime/server/backend.json`（原子写：先写 `.tmp` 再 `os.replace`）。启动时从该文件加载；若文件不存在则使用 `ACTIVE_BACKEND` 环境变量默认值。
@@ -268,7 +270,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 - `/backend`：显示当前后端和可选列表
 - `/codex`、`/claude`、`/qodercli`：切换全局后端
 
-命令在 `commands.py:process_command` 中处理，需传入 `router` 参数（两个 handler 均已适配）。
+命令在 `commands.py:process_command` 中处理，需传入 `router` 参数（两个 handler 均已适配）。后端切换成功后会清空当前会话历史，避免旧后端的工具、skills 或回答内容继续进入新后端 prompt。
 
 ### 7.4 Claude Code 族 CLI 适配
 

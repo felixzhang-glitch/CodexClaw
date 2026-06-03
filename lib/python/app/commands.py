@@ -78,6 +78,7 @@ def process_command(
             if router.active == target:
                 return CommandResult(handled=True, reply_text=f"当前已是 {target}（{router.label(target)}）后端。")
             if router.switch(target):
+                session_manager.reset_session(session_key)
                 return CommandResult(handled=True, reply_text=f"已切换后端为 {target}（{router.label(target)}）。")
             return CommandResult(handled=True, reply_text=f"切换失败: 未知后端 {target}。")
 

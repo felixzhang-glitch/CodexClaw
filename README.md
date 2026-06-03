@@ -18,6 +18,7 @@
 - Codex 统一客户端（超时、重试、错误处理、结构化日志）
 - 多后端路由：支持 `codex`、`claude`、`qodercli` 三个 CLI 后端，运行时通过命令切换
 - 后端状态持久化：切换后重启保留选择（`runtime/server/backend.json`）
+- 后端切换隔离：切换成功后清空当前会话上下文，`claude`/`qodercli` 使用独立工作目录避免工具状态串扰
 - streaming 增量回传 Feishu
 - 收到消息后先快速回执：消息 reaction（`emoji_type=Typing`）
 - 最终答案默认单条回复（避免分段刷屏）
@@ -168,6 +169,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - `/codex`：切换后端为 Codex CLI
 - `/claude`：切换后端为 Claude Code
 - `/qodercli`：切换后端为 Qoder CLI
+- 后端切换成功后会清空当前会话历史，避免旧后端的工具、skills 或回答风格污染新后端
 - `/remind 10m 喝水`：10 分钟后主动发送”喝水”；时间单位支持 `s/m/h/d`
 
 ## 配置项
@@ -184,7 +186,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - `FEISHU_RETRY_BACKOFF_SECONDS=0.5`
 - `FEISHU_RECEIVED_IMAGES_DIR=./runtime/feishu-images`
 - `CODEX_CLI_BIN=codex`
-- `CODEX_WORK_DIR=./runtime/codex-workdir`
+- `CODEX_WORK_DIR=./runtime/codex-workdir`（`codex` 直接使用该目录；`claude`、`qodercli` 分别使用其下的 `claude/`、`qodercli/` 子目录）
 - `CODEX_MODEL`（可空，留空时使用 codex CLI 默认模型）
 - `CODEX_PERMISSION_MODE=full`
 - `CODEX_TIMEOUT_SECONDS=30`
