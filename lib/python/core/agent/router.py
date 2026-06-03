@@ -40,6 +40,7 @@ class AgentRouter:
             bin_path=settings.claude_cli_bin,
             model=settings.claude_model,
             permission_mode=settings.claude_permission_mode,
+            timeout_seconds=settings.claude_timeout_seconds,
         )
         qodercli = ClaudeCliClient(
             settings=settings,
@@ -47,6 +48,7 @@ class AgentRouter:
             bin_path=settings.qodercli_cli_bin,
             model=settings.qodercli_model,
             permission_mode=settings.qodercli_permission_mode,
+            timeout_seconds=settings.qodercli_timeout_seconds,
             use_verbose=False,
             use_partial_messages=False,
         )

@@ -130,7 +130,8 @@ DEVELOPMENT.md       # 本文档
 - `CODEX_WORK_DIR`（默认 `./runtime/codex-workdir`）
 - `CODEX_PERMISSION_MODE`（默认 `full`）
 - `CODEX_MODEL`（可空；空时使用本机 codex 默认模型）
-- `CODEX_TIMEOUT_SECONDS`：单次读取 stdout 新行的超时时间，不是总任务时长上限
+- `CODEX_TIMEOUT_SECONDS`：Codex CLI 单次读取 stdout 新行的超时时间，不是 Codex 总任务时长上限
+- `CLAUDE_TIMEOUT_SECONDS` / `QODERCLI_TIMEOUT_SECONDS`：Claude-family CLI 单次请求总时长上限
 - `CODEX_STREAM_READ_LIMIT_BYTES`：subprocess stream 读取上限，避免超长单行 JSON 触发默认 64KB 限制
 - `CODEX_MAX_RETRIES`
 - `CODEX_RETRY_BACKOFF_SECONDS`
@@ -309,9 +310,11 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 | `CLAUDE_CLI_BIN` | `claude` | claude 二进制路径 |
 | `CLAUDE_MODEL` | （空） | claude 模型 |
 | `CLAUDE_PERMISSION_MODE` | `auto` | claude 权限模式 |
+| `CLAUDE_TIMEOUT_SECONDS` | `60` | claude 单次请求总时长上限 |
 | `QODERCLI_CLI_BIN` | `qodercli` | qodercli 二进制路径 |
 | `QODERCLI_MODEL` | （空） | qodercli 模型 |
 | `QODERCLI_PERMISSION_MODE` | `dangerously-skip-permissions` | qodercli 权限模式 |
+| `QODERCLI_TIMEOUT_SECONDS` | `60` | qodercli 单次请求总时长上限 |
 
 ---
 

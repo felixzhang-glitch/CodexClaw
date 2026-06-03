@@ -200,9 +200,11 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - `CLAUDE_CLI_BIN=claude`
 - `CLAUDE_MODEL`（可空）
 - `CLAUDE_PERMISSION_MODE=auto`（root 下 claude 不支持 bypass，`auto` 为最大权限模式）
+- `CLAUDE_TIMEOUT_SECONDS=60`（Claude Code 单次请求总时长上限）
 - `QODERCLI_CLI_BIN=qodercli`
 - `QODERCLI_MODEL`（可空）
 - `QODERCLI_PERMISSION_MODE=dangerously-skip-permissions`
+- `QODERCLI_TIMEOUT_SECONDS=60`（Qoder CLI 单次请求总时长上限）
 - `MAX_HISTORY_ROUNDS=10`
 - `STREAMING_ENABLED=true`
 - `TASK_RUNNING_NOTICE_SECONDS=30`

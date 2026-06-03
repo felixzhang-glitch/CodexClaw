@@ -40,6 +40,7 @@ class ClaudeCliClient:
         bin_path: str,
         model: str,
         permission_mode: str,
+        timeout_seconds: float | None = None,
         use_verbose: bool = True,
         use_partial_messages: bool = True,
     ) -> None:
@@ -48,6 +49,7 @@ class ClaudeCliClient:
         self._bin = bin_path
         self._model = (model or "").strip()
         self._permission_mode = (permission_mode or "").strip()
+        self._timeout_seconds = timeout_seconds if timeout_seconds is not None else settings.codex_timeout_seconds
         self._use_verbose = use_verbose
         self._use_partial_messages = use_partial_messages
 
@@ -236,7 +238,7 @@ class ClaudeCliClient:
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
-        deadline = time.monotonic() + self._settings.codex_timeout_seconds
+        deadline = time.monotonic() + self._timeout_seconds
 
         completed_message = ""
         fallback_parts: list[str] = []
@@ -294,7 +296,7 @@ class ClaudeCliClient:
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
-        deadline = time.monotonic() + self._settings.codex_timeout_seconds
+        deadline = time.monotonic() + self._timeout_seconds
 
         saw_incremental = False
         completed_message = ""

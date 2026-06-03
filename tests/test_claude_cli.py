@@ -6,7 +6,7 @@ from core.agent.claude_cli import ClaudeCliClient
 
 
 def make_settings(tmp_path):
-    return SimpleNamespace(codex_work_dir=str(tmp_path))
+    return SimpleNamespace(codex_work_dir=str(tmp_path), codex_timeout_seconds=30.0)
 
 
 def test_claude_family_clients_use_backend_scoped_work_dirs(tmp_path) -> None:
@@ -36,6 +36,19 @@ def test_claude_family_clients_use_backend_scoped_work_dirs(tmp_path) -> None:
     assert "--include-partial-messages" in claude_command
     assert "--verbose" not in qoder_command
     assert "--include-partial-messages" not in qoder_command
+
+
+def test_claude_family_clients_accept_backend_timeout(tmp_path) -> None:
+    client = ClaudeCliClient(
+        settings=make_settings(tmp_path),
+        name="claude",
+        bin_path="claude",
+        model="",
+        permission_mode="auto",
+        timeout_seconds=12.5,
+    )
+
+    assert client._timeout_seconds == 12.5
 
 
 def test_claude_prompt_includes_local_skill_summary(tmp_path, monkeypatch) -> None:
