@@ -628,7 +628,7 @@ class ClaudeCliClient:
                 self._circuit_open_until = time.time() + self._settings.codex_circuit_breaker_cooldown_seconds
 
     def _split_chunks(self, text: str) -> list[str]:
-        content = text.strip()
+        content = text
         if not content:
             return []
         if len(content) <= self._stream_piece_chars:

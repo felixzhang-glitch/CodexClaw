@@ -51,6 +51,20 @@ def test_claude_family_clients_accept_backend_timeout(tmp_path) -> None:
     assert client._timeout_seconds == 12.5
 
 
+def test_claude_stream_chunks_preserve_markdown_table_boundaries(tmp_path) -> None:
+    client = ClaudeCliClient(
+        settings=make_settings(tmp_path),
+        name="claude",
+        bin_path="claude",
+        model="",
+        permission_mode="auto",
+    )
+
+    chunks = client._split_chunks("\n| 日期 | 收盘 |\n| --- | --- |\n")
+
+    assert "".join(chunks) == "\n| 日期 | 收盘 |\n| --- | --- |\n"
+
+
 def test_claude_prompt_includes_local_skill_summary(tmp_path, monkeypatch) -> None:
     skill_dir = tmp_path / "skills" / "yfinance"
     skill_dir.mkdir(parents=True)
