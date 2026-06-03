@@ -24,6 +24,7 @@
 - 最终答案默认单条回复（避免分段刷屏）
 - 会话记忆（`user_id + chat_id` 维度，默认 10 轮 FIFO 裁剪）
 - 命令支持：`/new`、`/reset`、`/compact`、`/help`
+- 本机 skills 清单命令：`/skills` 或自然语言询问“列出所有可用 skills”时直接扫描 `SKILL.md` 返回
 - 运行中任务支持：超过阈值自动通知“仍在运行”，并可用 `/stop` 强制终止
 - 主动发送消息能力：普通回复失败时自动按 `chat_id` 兜底发送
 - 定时提醒命令：`/remind 10m 内容`
@@ -156,7 +157,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - CodexClaw: `http://127.0.0.1:8080/webhook/wechat`
 - sidecar health: `http://127.0.0.1:8787/healthz`
 
-当前 WeChat 版本先支持私聊文本、语音转文字文本、`/new`、`/reset`、`/compact`、`/help`、`/stop`、`/backend`、`/codex`、`/claude`、`/qodercli`。图片、文件、typing 和定时提醒后续再补。
+当前 WeChat 版本先支持私聊文本、语音转文字文本、`/new`、`/reset`、`/compact`、`/help`、`/stop`、`/backend`、`/codex`、`/claude`、`/qodercli`、`/skills`。图片、文件、typing 和定时提醒后续再补。
 
 ## 命令说明
 
@@ -170,6 +171,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - `/claude`：切换后端为 Claude Code
 - `/qodercli`：切换后端为 Qoder CLI
 - 后端切换成功后会清空当前会话历史，避免旧后端的工具、skills 或回答风格污染新后端
+- `/skills`：列出本机可用 skills；自然语言询问“列出所有可用 skills”也会直接返回该清单
 - `/remind 10m 喝水`：10 分钟后主动发送”喝水”；时间单位支持 `s/m/h/d`
 
 ## 配置项

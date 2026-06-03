@@ -272,6 +272,8 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 命令在 `commands.py:process_command` 中处理，需传入 `router` 参数（两个 handler 均已适配）。后端切换成功后会清空当前会话历史，避免旧后端的工具、skills 或回答内容继续进入新后端 prompt。
 
+`/skills` 以及“列出所有可用 skills”这类自然语言请求也在 `process_command` 中直接处理：服务扫描本机 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills` 下的 `SKILL.md`，返回确定性清单，不交给模型自由总结。
+
 ### 7.4 Claude Code 族 CLI 适配
 
 `ClaudeCliClient`（`claude_cli.py`）同时服务 `claude` 和 `qodercli`，因为二者是同族 CLI（相同 output-format）。

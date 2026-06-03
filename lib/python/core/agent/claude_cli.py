@@ -26,6 +26,12 @@ class ClaudeCliClient:
     are specific to the Claude Code family.
     """
 
+    SKILL_ROOTS = (
+        "~/.claude/skills",
+        "~/.codex/skills",
+        "~/.agents/skills",
+    )
+
     def __init__(
         self,
         settings: Settings,
@@ -489,9 +495,17 @@ class ClaudeCliClient:
             "你是 CodexClaw 的后端助手。",
             "请基于以下多轮对话，直接回复最后一条用户消息。",
             "仅输出回复正文，不要加额外前缀。",
-            "",
-            "对话历史:",
         ]
+        skill_summary = self._build_skill_summary()
+        if skill_summary:
+            prompt_lines.extend(
+                [
+                    "",
+                    "本机可用 skills 如下。若用户询问 skills，必须基于此列表回答，不要说当前环境没有加载 skill。",
+                    skill_summary,
+                ]
+            )
+        prompt_lines.extend(["", "对话历史:"])
 
         for message in messages:
             role = str(message.get("role", "user"))
@@ -507,6 +521,88 @@ class ClaudeCliClient:
             prompt_lines.append(f"{label}: {content}")
 
         return "\n".join(prompt_lines)
+
+    @classmethod
+    def _build_skill_summary(cls, *, limit: int = 80) -> str:
+        skills: dict[str, str] = {}
+        for root in cls.SKILL_ROOTS:
+            root_path = os.path.expanduser(root)
+            if not os.path.isdir(root_path):
+                continue
+            for dirpath, _, filenames in os.walk(root_path):
+                if "SKILL.md" not in filenames:
+                    continue
+                skill_path = os.path.join(dirpath, "SKILL.md")
+                name, description = cls._read_skill_metadata(skill_path)
+                if not name:
+                    name = os.path.basename(dirpath)
+                skills.setdefault(name, description)
+                if len(skills) >= limit:
+                    break
+            if len(skills) >= limit:
+                break
+
+        if not skills:
+            return ""
+        lines: list[str] = []
+        for name, description in sorted(skills.items(), key=lambda item: item[0].lower()):
+            if description:
+                lines.append(f"- `{name}`: {cls._truncate(description, limit=180)}")
+            else:
+                lines.append(f"- `{name}`")
+        return "\n".join(lines)
+
+    @classmethod
+    def _read_skill_metadata(cls, skill_path: str) -> tuple[str, str]:
+        try:
+            with open(skill_path, encoding="utf-8") as fh:
+                lines = fh.readlines()
+        except OSError:
+            return "", ""
+
+        if not lines or lines[0].strip() != "---":
+            return "", ""
+
+        name = ""
+        description = ""
+        idx = 1
+        while idx < len(lines):
+            line = lines[idx].rstrip("\n")
+            stripped = line.strip()
+            if stripped == "---":
+                break
+            if stripped.startswith("name:"):
+                name = cls._clean_yaml_value(stripped.split(":", 1)[1])
+            elif stripped.startswith("description:"):
+                raw_value = stripped.split(":", 1)[1].strip()
+                if raw_value in {">", ">-", "|", "|-"}:
+                    idx += 1
+                    parts: list[str] = []
+                    while idx < len(lines):
+                        next_line = lines[idx].rstrip("\n")
+                        next_stripped = next_line.strip()
+                        if next_stripped == "---":
+                            idx -= 1
+                            break
+                        if next_line and not next_line.startswith((" ", "\t")):
+                            idx -= 1
+                            break
+                        if next_stripped:
+                            parts.append(next_stripped)
+                        idx += 1
+                    description = " ".join(parts)
+                else:
+                    description = cls._clean_yaml_value(raw_value)
+            idx += 1
+
+        return name, description
+
+    @staticmethod
+    def _clean_yaml_value(value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+            return cleaned[1:-1].strip()
+        return cleaned
 
     def _assert_circuit_closed(self) -> None:
         with self._lock:

@@ -1,4 +1,5 @@
 from app.commands import parse_reminder_command, process_command
+from core.agent.claude_cli import ClaudeCliClient
 from core.session.manager import SessionManager
 
 
@@ -82,3 +83,26 @@ def test_backend_switch_noop_keeps_current_session_history() -> None:
     assert result is not None
     assert "当前已是 claude" in result.reply_text
     assert manager.round_count(key) == 1
+
+
+def test_skill_list_request_returns_local_skill_catalog(tmp_path, monkeypatch) -> None:
+    skill_dir = tmp_path / "skills" / "yfinance"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: yfinance
+description: "查询全球股票行情。"
+---
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ClaudeCliClient, "SKILL_ROOTS", (str(tmp_path / "skills"),))
+    manager = SessionManager(max_history_rounds=10)
+    key = SessionManager.build_key("u1", "c1")
+
+    result = process_command("列出你的所有可用 skills", manager, key)
+
+    assert result is not None
+    assert result.handled is True
+    assert "当前本机可用 skills" in result.reply_text
+    assert "`yfinance`" in result.reply_text

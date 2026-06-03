@@ -29,7 +29,8 @@ WECHAT_HELP_TEXT = (
     "/backend - 查看当前后端及可切换列表\n"
     "/codex - 切换后端为 Codex CLI\n"
     "/claude - 切换后端为 Claude Code\n"
-    "/qodercli - 切换后端为 Qoder CLI"
+    "/qodercli - 切换后端为 Qoder CLI\n"
+    "/skills - 列出本机可用 skills"
 )
 
 
