@@ -96,6 +96,101 @@ async def test_send_text_payload_to_chat_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_markdown_payload_to_chat_id() -> None:
+    calls = {"send_body": None, "query": None}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/tenant_access_token/internal"):
+            return httpx.Response(
+                status_code=200,
+                json={"code": 0, "tenant_access_token": "t-1", "expire": 7200},
+            )
+
+        if request.url.path.endswith("/messages"):
+            calls["send_body"] = json.loads(request.content.decode("utf-8"))
+            calls["query"] = dict(request.url.params)
+            return httpx.Response(status_code=200, json={"code": 0, "data": {"message_id": "om_new"}})
+
+        return httpx.Response(status_code=404, json={"code": 99999})
+
+    settings = SimpleNamespace(
+        feishu_api_base="https://open.feishu.cn",
+        feishu_app_id="cli_xxx",
+        feishu_app_secret="secret",
+        feishu_tenant_token_url="https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        feishu_reply_url_template="https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reply",
+        feishu_send_message_url="https://open.feishu.cn/open-apis/im/v1/messages",
+        feishu_image_upload_url="https://open.feishu.cn/open-apis/im/v1/images",
+        feishu_reaction_url_template="https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reactions",
+    )
+
+    client = FeishuClient(settings=settings)
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10.0)
+
+    message_id = await client.send_markdown(
+        receive_id="oc_1",
+        receive_id_type="chat_id",
+        markdown="**提醒内容**\n\n```python\nprint('ok')\n```",
+        trace_id="t1",
+        request_uuid="u1",
+    )
+    await client.close()
+
+    assert message_id == "om_new"
+    assert calls["query"] == {"receive_id_type": "chat_id"}
+    assert calls["send_body"]["receive_id"] == "oc_1"
+    assert calls["send_body"]["msg_type"] == "interactive"
+    assert calls["send_body"]["uuid"] == "u1"
+    card = json.loads(calls["send_body"]["content"])
+    assert card["config"] == {"wide_screen_mode": True}
+    assert card["elements"][0]["tag"] == "div"
+    assert card["elements"][0]["text"] == {
+        "tag": "lark_md",
+        "content": "**提醒内容**\n\n```python\nprint('ok')\n```",
+    }
+
+
+@pytest.mark.asyncio
+async def test_reply_markdown_payload() -> None:
+    calls = {"reply_body": None}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/tenant_access_token/internal"):
+            return httpx.Response(
+                status_code=200,
+                json={"code": 0, "tenant_access_token": "t-1", "expire": 7200},
+            )
+
+        if request.url.path.endswith("/messages/om_1/reply"):
+            calls["reply_body"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(status_code=200, json={"code": 0, "data": {}})
+
+        return httpx.Response(status_code=404, json={"code": 99999})
+
+    settings = SimpleNamespace(
+        feishu_api_base="https://open.feishu.cn",
+        feishu_app_id="cli_xxx",
+        feishu_app_secret="secret",
+        feishu_tenant_token_url="https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        feishu_reply_url_template="https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reply",
+        feishu_send_message_url="https://open.feishu.cn/open-apis/im/v1/messages",
+        feishu_image_upload_url="https://open.feishu.cn/open-apis/im/v1/images",
+        feishu_reaction_url_template="https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/reactions",
+    )
+
+    client = FeishuClient(settings=settings)
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10.0)
+
+    await client.reply_markdown(message_id="om_1", markdown="# 标题", trace_id="t1", request_uuid="u1")
+    await client.close()
+
+    assert calls["reply_body"]["msg_type"] == "interactive"
+    assert calls["reply_body"]["uuid"] == "u1"
+    card = json.loads(calls["reply_body"]["content"])
+    assert card["elements"][0]["text"] == {"tag": "lark_md", "content": "# 标题"}
+
+
+@pytest.mark.asyncio
 async def test_feishu_request_retries_transient_failure() -> None:
     calls = {"send": 0}
 

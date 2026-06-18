@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     max_history_rounds: int = Field(default=10, validation_alias="MAX_HISTORY_ROUNDS")
     streaming_enabled: bool = Field(default=True, validation_alias="STREAMING_ENABLED")
     task_running_notice_seconds: float = Field(default=30.0, validation_alias="TASK_RUNNING_NOTICE_SECONDS")
-    feishu_message_chunk_chars: int = Field(default=120, validation_alias="FEISHU_MESSAGE_CHUNK_CHARS")
+    feishu_message_chunk_chars: int = Field(default=1500, validation_alias="FEISHU_MESSAGE_CHUNK_CHARS")
     feishu_stream_flush_seconds: float = Field(default=1.0, validation_alias="FEISHU_STREAM_FLUSH_SECONDS")
     wechat_webhook_token: str = Field(default="", validation_alias="WECHAT_WEBHOOK_TOKEN")
     wechat_message_chunk_chars: int = Field(default=1800, validation_alias="WECHAT_MESSAGE_CHUNK_CHARS")

@@ -24,6 +24,17 @@ class FakeFeishuClient:
         self.image_upload_started_event: asyncio.Event | None = None
         self.download_image_calls: list[tuple[str, str]] = []
 
+    async def reply_markdown(
+        self,
+        message_id: str,
+        markdown: str,
+        trace_id: str,
+        request_uuid: str | None = None,
+    ) -> None:
+        if self.fail_reply:
+            raise FeishuClientError("reply failed")
+        self.reply_calls.append((markdown, request_uuid))
+
     async def reply_text(
         self,
         message_id: str,
@@ -34,6 +45,17 @@ class FakeFeishuClient:
         if self.fail_reply:
             raise FeishuClientError("reply failed")
         self.reply_calls.append((text, request_uuid))
+
+    async def send_markdown(
+        self,
+        receive_id: str,
+        markdown: str,
+        trace_id: str,
+        receive_id_type: str = "chat_id",
+        request_uuid: str | None = None,
+    ) -> str:
+        self.send_calls.append((receive_id, markdown, request_uuid))
+        return "om_sent"
 
     async def send_text(
         self,

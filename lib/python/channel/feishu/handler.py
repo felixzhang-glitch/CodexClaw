@@ -81,7 +81,8 @@ class FeishuWebhookHandler:
 
         self._verify_token(payload=payload)
 
-        asyncio.create_task(self._handle_text_event(event=event, trace_id=trace_id))
+        task = asyncio.create_task(self._handle_text_event(event=event, trace_id=trace_id))
+        task.add_done_callback(lambda done: self._log_background_task_result(done, trace_id))
         return {"code": 0}
 
     async def _handle_text_event(self, event: Any, trace_id: str) -> None:
@@ -651,6 +652,23 @@ class FeishuWebhookHandler:
             return
 
         try:
+            await self._feishu_client.reply_markdown(
+                message_id=message_id,
+                markdown=content,
+                trace_id=trace_id,
+                request_uuid=request_uuid,
+            )
+            return
+        except FeishuClientError as exc:
+            logger.warning(
+                "markdown reply failed, falling back to text reply",
+                extra={
+                    "trace_id": trace_id,
+                    "event": "feishu.reply_markdown_fallback",
+                    "error_code": type(exc).__name__,
+                },
+            )
+        try:
             await self._feishu_client.reply_text(
                 message_id=message_id,
                 text=content,
@@ -660,7 +678,7 @@ class FeishuWebhookHandler:
             return
         except FeishuClientError as exc:
             logger.warning(
-                "reply failed, falling back to chat send",
+                "text reply failed, falling back to chat send",
                 extra={"trace_id": trace_id, "event": "feishu.reply_fallback", "error_code": type(exc).__name__},
             )
             chunks = self._split_chunks(content)
@@ -687,13 +705,30 @@ class FeishuWebhookHandler:
             chunk_uuid = request_uuid
             if request_uuid and len(chunks) > 1:
                 chunk_uuid = f"{request_uuid}-send-part-{idx}"
-            await self._feishu_client.send_text(
-                receive_id=chat_id,
-                receive_id_type="chat_id",
-                text=chunk,
-                trace_id=trace_id,
-                request_uuid=chunk_uuid,
-            )
+            try:
+                await self._feishu_client.send_markdown(
+                    receive_id=chat_id,
+                    receive_id_type="chat_id",
+                    markdown=chunk,
+                    trace_id=trace_id,
+                    request_uuid=chunk_uuid,
+                )
+            except FeishuClientError as exc:
+                logger.warning(
+                    "markdown send failed, falling back to text send",
+                    extra={
+                        "trace_id": trace_id,
+                        "event": "feishu.send_markdown_fallback",
+                        "error_code": type(exc).__name__,
+                    },
+                )
+                await self._feishu_client.send_text(
+                    receive_id=chat_id,
+                    receive_id_type="chat_id",
+                    text=chunk,
+                    trace_id=trace_id,
+                    request_uuid=chunk_uuid,
+                )
 
     async def _send_quick_ack(self, message_id: str, trace_id: str) -> None:
         try:
@@ -759,3 +794,15 @@ class FeishuWebhookHandler:
         configured_max_len = int(getattr(self._settings, "feishu_message_chunk_chars", 1500) or 1500)
         chunk_len = max_len or configured_max_len
         return split_message_text(text, max_chars=chunk_len)
+
+    @staticmethod
+    def _log_background_task_result(task: asyncio.Task[None], trace_id: str) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception(
+                "background feishu task failed",
+                extra={"trace_id": trace_id, "event": "feishu.background_error"},
+            )

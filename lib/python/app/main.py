@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.logging import setup_logging
-from channel.feishu.client import FeishuClient
+from channel.feishu.client import FeishuClient, FeishuClientError
 from channel.feishu.handler import FeishuWebhookHandler
 from channel.wechat.handler import WeChatWebhookHandler
 from core.agent.router import AgentRouter
@@ -30,13 +30,23 @@ feishu_client = FeishuClient(settings=settings)
 
 
 async def send_reminder(chat_id: str, text: str, trace_id: str) -> None:
-    await feishu_client.send_text(
-        receive_id=chat_id,
-        receive_id_type="chat_id",
-        text=text,
-        trace_id=trace_id,
-        request_uuid=trace_id,
-    )
+    try:
+        await feishu_client.send_markdown(
+            receive_id=chat_id,
+            receive_id_type="chat_id",
+            markdown=text,
+            trace_id=trace_id,
+            request_uuid=trace_id,
+        )
+    except FeishuClientError:
+        logger.warning("markdown reminder failed, falling back to text", extra={"trace_id": trace_id})
+        await feishu_client.send_text(
+            receive_id=chat_id,
+            receive_id_type="chat_id",
+            text=text,
+            trace_id=trace_id,
+            request_uuid=trace_id,
+        )
 
 
 reminder_scheduler = ReminderScheduler(callback=send_reminder, store_path=settings.reminder_store_path)

@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
+from channel.feishu.formatting import build_markdown_card
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,106 @@ class FeishuClient:
             extra={
                 "trace_id": trace_id,
                 "event": "feishu.send",
+                "status_code": response.status_code,
+            },
+        )
+
+        message = data.get("data")
+        if isinstance(message, dict):
+            message_id = message.get("message_id")
+            if isinstance(message_id, str):
+                return message_id
+        return ""
+
+    async def reply_markdown(
+        self,
+        message_id: str,
+        markdown: str,
+        trace_id: str,
+        request_uuid: str | None = None,
+    ) -> None:
+        if not markdown:
+            return
+
+        url = self._settings.feishu_reply_url_template.format(message_id=message_id)
+        payload: dict[str, Any] = {
+            "msg_type": "interactive",
+            "content": json.dumps(build_markdown_card(markdown), ensure_ascii=False),
+        }
+        if request_uuid:
+            payload["uuid"] = request_uuid
+
+        response, data = await self._post_authenticated_json(
+            url=url,
+            payload=payload,
+            trace_id=trace_id,
+            event="feishu.reply_markdown",
+        )
+        if data.get("code") != 0:
+            logger.error(
+                "feishu markdown reply failed",
+                extra={
+                    "trace_id": trace_id,
+                    "event": "feishu.reply_markdown",
+                    "status_code": response.status_code,
+                    "error_code": data.get("code"),
+                },
+            )
+            raise FeishuClientError(f"feishu markdown reply failed: {data}")
+
+        logger.info(
+            "feishu markdown reply sent",
+            extra={
+                "trace_id": trace_id,
+                "event": "feishu.reply_markdown",
+                "status_code": response.status_code,
+            },
+        )
+
+    async def send_markdown(
+        self,
+        receive_id: str,
+        markdown: str,
+        trace_id: str,
+        receive_id_type: str = "chat_id",
+        request_uuid: str | None = None,
+    ) -> str:
+        if not markdown:
+            return ""
+
+        params = {"receive_id_type": receive_id_type}
+        payload: dict[str, Any] = {
+            "receive_id": receive_id,
+            "msg_type": "interactive",
+            "content": json.dumps(build_markdown_card(markdown), ensure_ascii=False),
+        }
+        if request_uuid:
+            payload["uuid"] = request_uuid
+
+        response, data = await self._post_authenticated_json(
+            url=self._settings.feishu_send_message_url,
+            payload=payload,
+            trace_id=trace_id,
+            event="feishu.send_markdown",
+            params=params,
+        )
+        if data.get("code") != 0:
+            logger.error(
+                "feishu markdown send failed",
+                extra={
+                    "trace_id": trace_id,
+                    "event": "feishu.send_markdown",
+                    "status_code": response.status_code,
+                    "error_code": data.get("code"),
+                },
+            )
+            raise FeishuClientError(f"feishu markdown send failed: {data}")
+
+        logger.info(
+            "feishu markdown sent",
+            extra={
+                "trace_id": trace_id,
+                "event": "feishu.send_markdown",
                 "status_code": response.status_code,
             },
         )

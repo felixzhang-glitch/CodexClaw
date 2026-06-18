@@ -1,4 +1,4 @@
-from channel.feishu.formatting import split_message_text
+from channel.feishu.formatting import build_markdown_card, split_message_text
 
 
 def test_split_message_text_prefers_paragraph_boundaries() -> None:
@@ -16,3 +16,20 @@ def test_split_message_text_preserves_small_code_block() -> None:
     chunks = split_message_text(text, max_chars=60)
 
     assert chunks == [text]
+
+
+def test_build_markdown_card_uses_lark_markdown_text() -> None:
+    card = build_markdown_card("**重点**")
+
+    assert card == {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "**重点**",
+                },
+            }
+        ],
+    }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 
 def normalize_reply_text(text: str) -> str:
@@ -10,6 +11,21 @@ def normalize_reply_text(text: str) -> str:
     cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
     cleaned = re.sub(r"\n{4,}", "\n\n\n", cleaned)
     return cleaned
+
+
+def build_markdown_card(markdown: str) -> dict[str, Any]:
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": markdown,
+                },
+            }
+        ],
+    }
 
 
 def split_message_text(text: str, max_chars: int) -> list[str]:

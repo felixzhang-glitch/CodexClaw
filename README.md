@@ -22,6 +22,7 @@
 - streaming 增量回传 Feishu
 - 收到消息后先快速回执：消息 reaction（`emoji_type=Typing`）
 - 最终答案默认单条回复（避免分段刷屏）
+- Feishu 文本回复默认使用 Markdown 卡片渲染，失败时自动降级为普通文本
 - 会话记忆（`user_id + chat_id` 维度，默认 10 轮 FIFO 裁剪）
 - 命令支持：`/new`、`/reset`、`/compact`、`/help`
 - 本机 skills 清单命令：`/skills` 或自然语言询问“列出所有可用 skills”时直接扫描 `SKILL.md` 返回
@@ -208,7 +209,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - `MAX_HISTORY_ROUNDS=10`
 - `STREAMING_ENABLED=true`
 - `TASK_RUNNING_NOTICE_SECONDS=30`
-- `FEISHU_MESSAGE_CHUNK_CHARS=120`
+- `FEISHU_MESSAGE_CHUNK_CHARS=1500`
 - `WECHAT_WEBHOOK_TOKEN`
 - `WECHAT_MESSAGE_CHUNK_CHARS=1800`
 - `REMINDER_STORE_PATH=./runtime/server/reminders.json`

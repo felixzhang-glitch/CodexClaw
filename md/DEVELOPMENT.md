@@ -148,7 +148,7 @@ DEVELOPMENT.md       # 本文档
 - `MAX_HISTORY_ROUNDS`：会话记忆轮数，默认 `10`
 - `STREAMING_ENABLED`：是否启用流式获取（当前即使流式获取，也会汇总后单条回发）
 - `TASK_RUNNING_NOTICE_SECONDS`：长任务通知阈值，默认 `30`
-- `FEISHU_MESSAGE_CHUNK_CHARS`：Feishu 文本拆分长度，默认 `120`
+- `FEISHU_MESSAGE_CHUNK_CHARS`：Feishu 文本拆分长度，默认 `1500`
 - `REMINDER_STORE_PATH`：待触发提醒持久化文件，默认 `./runtime/server/reminders.json`
 - `SERVER_HOST`
 - `SERVER_PORT`
