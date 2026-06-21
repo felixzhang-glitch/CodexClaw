@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 740" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" text-rendering="geometricPrecision">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F1F5F9"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F8FAFC"/>
+    </linearGradient>
+    <linearGradient id="router" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3B82F6" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="9" flood-color="#1E3A8A" flood-opacity="0.1"/>
+    </filter>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/>
+    </marker>
+    <marker id="arrA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2563EB"/>
+    </marker>
+  </defs>
+
+  <!-- background -->
+  <rect width="1000" height="740" fill="url(#bg)"/>
+  <ellipse cx="500" cy="506" rx="320" ry="130" fill="url(#halo)"/>
+
+  <!-- title -->
+  <text x="500" y="44" text-anchor="middle" fill="#0F172A" font-size="20" font-weight="600" letter-spacing="2">CodexClaw</text>
+  <text x="500" y="64" text-anchor="middle" fill="#94A3B8" font-size="10" letter-spacing="4">ARCHITECTURE</text>
+
+  <!-- ===== connections ===== -->
+  <g fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M330,172 L330,222" marker-end="url(#arr)"/>
+    <path d="M670,172 L670,222" marker-end="url(#arr)"/>
+    <path d="M355,294 L355,344" marker-end="url(#arr)"/>
+    <path d="M645,294 L645,344" marker-end="url(#arr)"/>
+    <path d="M355,416 L355,441 L420,441 L420,466" marker-end="url(#arr)"/>
+    <path d="M645,416 L645,441 L580,441 L580,466" marker-end="url(#arr)"/>
+  </g>
+  <g fill="none" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.85">
+    <path d="M400,546 L400,573 L220,573 L220,600" marker-end="url(#arrA)"/>
+    <path d="M500,546 L500,600" marker-end="url(#arrA)"/>
+    <path d="M600,546 L600,573 L780,573 L780,600" marker-end="url(#arrA)"/>
+  </g>
+
+  <!-- ===== cards ===== -->
+  <!-- 飞书 -->
+  <g filter="url(#shadow)">
+    <rect x="230" y="100" width="200" height="72" rx="12" fill="url(#card)" stroke="#E2E8F0" stroke-width="1"/>
+    <rect x="242" y="106" width="176" height="2" rx="1" fill="#3B82F6"/>
+  </g>
+  <text x="330" y="134" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="600">飞书 Feishu</text>
+  <text x="330" y="154" text-anchor="middle" fill="#64748B" font-size="11">事件回调</text>
+
+  <!-- 微信 -->
+  <g filter="url(#shadow)">
+    <rect x="570" y="100" width="200" height="72" rx="12" fill="url(#card)" stroke="#E2E8F0" stroke-width="1"/>
+    <rect x="582" y="106" width="176" height="2" rx="1" fill="#06B6D4"/>
+  </g>
+  <text x="670" y="134" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="600">微信 WeChat</text>
+  <text x="670" y="154" text-anchor="middle" fill="#64748B" font-size="11">sidecar 长轮询</text>
+
+  <!-- FastAPI -->
+  <g filter="url(#shadow)">
+    <rect x="230" y="222" width="540" height="72" rx="12" fill="url(#card)" stroke="#E2E8F0" stroke-width="1"/>
+    <rect x="242" y="228" width="516" height="2" rx="1" fill="#475569"/>
+  </g>
+  <text x="500" y="256" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="600">FastAPI</text>
+  <text x="500" y="276" text-anchor="middle" fill="#64748B" font-size="11">POST /webhook/feishu · /wechat      |      异步处理 · 3s 回执</text>
+
+  <!-- FeishuHandler -->
+  <g filter="url(#shadow)">
+    <rect x="230" y="344" width="250" height="72" rx="12" fill="url(#card)" stroke="#E2E8F0" stroke-width="1"/>
+    <rect x="242" y="350" width="226" height="2" rx="1" fill="#3B82F6"/>
+  </g>
+  <text x="355" y="378" text-anchor="middle" fill="#0F172A" font-size="14" font-weight="600">FeishuWebhookHandler</text>
+  <text x="355" y="398" text-anchor="middle" fill="#64748B" font-size="11">会话 · 去重 · 任务 · 提醒</text>
+
+  <!-- WeChatHandler -->
+  <g filter="url(#shadow)">
+    <rect x="520" y="344" width="250" height="72" rx="12" fill="url(#card)" stroke="#E2E8F0" stroke-width="1"/>
+    <rect x="532" y="350" width="226" height="2" rx="1" fill="#06B6D4"/>
+  </g>
+  <text x="645" y="378" text-anchor="middle" fill="#0F172A" font-size="14" font-weight="600">WeChatWebhookHandler</text>
+  <text x="645" y="398" text-anchor="middle" fill="#64748B" font-size="11">会话 · 去重 · 任务</text>
+
+  <!-- AgentRouter (强调) -->
+  <g filter="url(#shadow)">
+    <rect x="330" y="466" width="340" height="80" rx="14" fill="url(#router)" stroke="#1D4ED8" stroke-width="1"/>
+  </g>
+  <text x="500" y="500" text-anchor="middle" fill="#FFFFFF" font-size="16" font-weight="700" letter-spacing="0.5">AgentRouter</text>
+  <text x="500" y="524" text-anchor="middle" fill="#BFDBFE" font-size="11">运行时多后端切换 · cancel 广播 · 状态持久化</text>
+
+  <!-- CodexClient -->
+  <g filter="url(#shadow)">
+    <rect x="120" y="600" width="200" height="68" rx="12" fill="url(#card)" stroke="#DBEAFE" stroke-width="1"/>
+    <rect x="132" y="606" width="176" height="2" rx="1" fill="#2563EB"/>
+  </g>
+  <text x="220" y="632" text-anchor="middle" fill="#0F172A" font-size="14" font-weight="600">CodexClient</text>
+  <text x="220" y="652" text-anchor="middle" fill="#2563EB" font-size="11">codex exec --json</text>
+
+  <!-- ClaudeCliClient -->
+  <g filter="url(#shadow)">
+    <rect x="400" y="600" width="200" height="68" rx="12" fill="url(#card)" stroke="#E0E7FF" stroke-width="1"/>
+    <rect x="412" y="606" width="176" height="2" rx="1" fill="#6366F1"/>
+  </g>
+  <text x="500" y="632" text-anchor="middle" fill="#0F172A" font-size="14" font-weight="600">ClaudeCliClient</text>
+  <text x="500" y="652" text-anchor="middle" fill="#6366F1" font-size="11">claude -p</text>
+
+  <!-- QoderCliClient -->
+  <g filter="url(#shadow)">
+    <rect x="680" y="600" width="200" height="68" rx="12" fill="url(#card)" stroke="#EDE9FE" stroke-width="1"/>
+    <rect x="692" y="606" width="176" height="2" rx="1" fill="#8B5CF6"/>
+  </g>
+  <text x="780" y="632" text-anchor="middle" fill="#0F172A" font-size="14" font-weight="600">ClaudeCliClient</text>
+  <text x="780" y="652" text-anchor="middle" fill="#8B5CF6" font-size="11">qodercli -p</text>
+
+  <!-- footer label -->
+  <text x="500" y="712" text-anchor="middle" fill="#94A3B8" font-size="10" letter-spacing="2">IM → CLI BRIDGE · MULTI-BACKEND ROUTING</text>
+</svg>
