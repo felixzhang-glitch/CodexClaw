@@ -25,7 +25,8 @@ class AgentRouter:
     Presents the same surface (chat / chat_stream / cancel / close) the handlers
     expect from a backend client, so it is a drop-in replacement for CodexClient.
     The active backend is persisted to disk so it survives restarts. cancel() is
-    broadcast to every backend so /stop works no matter which one ran the task.
+    broadcast to every backend so /stop works no matter which one ran the task;
+    non-active backends with no matching process simply return False.
     """
 
     def __init__(self, settings: Settings) -> None:

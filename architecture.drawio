@@ -1,0 +1,203 @@
+<mxfile host="app.diagrams.net" modified="2026-06-21T04:30:00.000Z" agent="Qoder" version="24.0.0">
+  <diagram name="CodexClaw Architecture" id="codexclaw-arch">
+    <mxGraphModel dx="1440" dy="1020" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1440" pageHeight="1020" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== 分层标注 (左侧) ===== -->
+        <mxCell id="N_TIER1" value="渠道层" style="text;html=1;align=center;fontColor=#CBD5E0;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="20" y="142" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="N_TIER2" value="接入层" style="text;html=1;align=center;fontColor=#CBD5E0;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="20" y="356" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="N_TIER3" value="处理层" style="text;html=1;align=center;fontColor=#CBD5E0;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="20" y="440" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="N_TIER4" value="路由层" style="text;html=1;align=center;fontColor=#CBD5E0;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="20" y="644" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="N_TIER5" value="后端层" style="text;html=1;align=center;fontColor=#CBD5E0;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="20" y="780" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="N_TIER6" value="进程层" style="text;html=1;align=center;fontColor=#CBD5E0;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="20" y="914" width="60" height="16" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 消息来源 ===== -->
+        <mxCell id="N_FS_USER" value="飞书用户" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDF2F7;strokeColor=#A0AEC0;fontColor=#2D3748;fontSize=12;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="120" y="120" width="160" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="N_WX_USER" value="微信用户" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDF2F7;strokeColor=#A0AEC0;fontColor=#2D3748;fontSize=12;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="120" y="260" width="160" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="N_SIDECAR" value="wechat-sidecar.mjs&#10;Node.js · 长轮询" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDF2F7;strokeColor=#A0AEC0;fontColor=#2D3748;fontSize=11;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="120" y="340" width="160" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== FastAPI 容器 ===== -->
+        <mxCell id="C_FASTAPI" value="FastAPI · app/main.py" style="swimlane;html=1;fillColor=#F7FAFC;strokeColor=#CBD5E0;startSize=28;fontStyle=1;fontSize=12;fontColor=#4A5568;swimlaneFillColor=#FFFFFF;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="400" y="100" width="380" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="N_ROUTE_FEISHU" value="POST /webhook/feishu" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=12;arcSize=10;shadow=1;" vertex="1" parent="C_FASTAPI">
+          <mxGeometry x="20" y="48" width="340" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="N_ROUTE_WECHAT" value="POST /webhook/wechat" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=12;arcSize=10;shadow=1;" vertex="1" parent="C_FASTAPI">
+          <mxGeometry x="20" y="98" width="340" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="N_HEALTHZ" value="GET /healthz" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=12;arcSize=10;shadow=1;" vertex="1" parent="C_FASTAPI">
+          <mxGeometry x="20" y="148" width="340" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="N_FASTAPI_NOTE" value="异步处理 · 3s 内回执" style="text;html=1;align=center;fontColor=#A0AEC0;fontSize=10;fontStyle=2;" vertex="1" parent="C_FASTAPI">
+          <mxGeometry x="20" y="200" width="340" height="24" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Feishu OpenAPI (云) ===== -->
+        <mxCell id="N_FEISHU_API" value="Feishu OpenAPI (云)&#10;事件回调 · 回复 · reaction · 图片" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EBF8FF;strokeColor=#3182CE;fontColor=#2C5282;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="900" y="240" width="240" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- ===== Handler 层 ===== -->
+        <mxCell id="N_FS_HANDLER" value="FeishuWebhookHandler&#10;channel/feishu/handler.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="400" y="420" width="180" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="N_WX_HANDLER" value="WeChatWebhookHandler&#10;channel/wechat/handler.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="420" width="180" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 核心服务容器 ===== -->
+        <mxCell id="C_CORE" value="核心服务 · core/session + app" style="swimlane;html=1;fillColor=#F7FAFC;strokeColor=#CBD5E0;startSize=28;fontStyle=1;fontSize=12;fontColor=#4A5568;swimlaneFillColor=#FFFFFF;rounded=1;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="900" y="420" width="460" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="N_SESSION" value="SessionManager&#10;会话记忆 · FIFO 裁剪" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="C_CORE">
+          <mxGeometry x="20" y="48" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="N_DEDUP" value="MessageDeduplicator&#10;message_id 去重" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="C_CORE">
+          <mxGeometry x="240" y="48" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="N_TASK" value="ActiveTaskRegistry&#10;运行态互斥 · 取消" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="C_CORE">
+          <mxGeometry x="20" y="112" width="200" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="N_REMIND" value="ReminderScheduler&#10;定时提醒 · 持久化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2D3748;fontColor=#1A202C;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="C_CORE">
+          <mxGeometry x="240" y="112" width="200" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== AgentRouter (强调) ===== -->
+        <mxCell id="N_ROUTER" value="AgentRouter  ·  core/agent/router.py&#10;运行时多后端切换 · cancel 广播 · 状态持久化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1A365D;strokeColor=#1A365D;fontColor=#FFFFFF;fontStyle=1;fontSize=12;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="620" width="400" height="64" as="geometry" />
+        </mxCell>
+
+        <!-- ===== CLI 客户端层 ===== -->
+        <mxCell id="N_CODEX_CLI" value="CodexClient&#10;core/codex/client.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6FFFA;strokeColor=#2C7A7B;fontColor=#234E52;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="760" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="N_CLAUDE_CLI" value="ClaudeCliClient · claude&#10;core/agent/claude_cli.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6FFFA;strokeColor=#2C7A7B;fontColor=#234E52;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="480" y="760" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="N_QODER_CLI" value="ClaudeCliClient · qodercli&#10;core/agent/claude_cli.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6FFFA;strokeColor=#2C7A7B;fontColor=#234E52;fontSize=11;arcSize=10;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="760" y="760" width="200" height="56" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 本机子进程 ===== -->
+        <mxCell id="N_CODEX_PROC" value="codex exec --json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#718096;dashed=1;fontColor=#4A5568;fontSize=11;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="200" y="900" width="200" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="N_CLAUDE_PROC" value="claude -p --output-format json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#718096;dashed=1;fontColor=#4A5568;fontSize=11;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="480" y="900" width="200" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="N_QODER_PROC" value="qodercli -p --output-format json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#718096;dashed=1;fontColor=#4A5568;fontSize=11;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="760" y="900" width="200" height="44" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 图例 ===== -->
+        <mxCell id="N_LEGEND_TITLE" value="图例" style="text;html=1;align=left;fontColor=#4A5568;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="660" width="200" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="N_LEGEND1" value="━ 请求 / 数据流" style="text;html=1;align=left;fontColor=#718096;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="684" width="200" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="N_LEGEND2" value="┄ 使用 / 回调关系" style="text;html=1;align=left;fontColor=#718096;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="706" width="200" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="N_LEGEND3" value="━ 后端路由分发" style="text;html=1;align=left;fontColor=#2C7A7B;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="728" width="200" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="N_LEGEND4" value="■ 核心路由组件" style="text;html=1;align=left;fontColor=#1A365D;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="750" width="200" height="18" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 边：消息来源 → 接入 ===== -->
+        <mxCell id="E_FS_USER_API" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;fontColor=#4A5568;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_FS_USER" target="N_FEISHU_API">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_FS_USER_API_L" value="事件回调" style="text;html=1;fontColor=#718096;fontSize=9;align=center;" vertex="1" parent="1">
+          <mxGeometry x="540" y="160" width="60" height="16" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 边：接入 → FastAPI ===== -->
+        <mxCell id="E_API_ROUTE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.3;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_FEISHU_API" target="C_FASTAPI">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_WX_USER_SIDECAR" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_WX_USER" target="N_SIDECAR">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_SIDECAR_ROUTE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.7;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_SIDECAR" target="C_FASTAPI">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 边：FastAPI → Handler ===== -->
+        <mxCell id="E_ROUTE_FS_H" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="C_FASTAPI" target="N_FS_HANDLER">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_ROUTE_WX_H" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0.7;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="C_FASTAPI" target="N_WX_HANDLER">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 边：Handler → 核心服务 (虚线 使用) ===== -->
+        <mxCell id="E_FS_H_CORE" value="使用" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#A0AEC0;dashed=1;fontSize=10;fontColor=#718096;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_FS_HANDLER" target="C_CORE">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_WX_H_CORE" value="使用" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#A0AEC0;dashed=1;fontSize=10;fontColor=#718096;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.7;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_WX_HANDLER" target="C_CORE">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 边：Handler → Feishu OpenAPI (虚线 回复) ===== -->
+        <mxCell id="E_FS_H_API" value="回复 / reaction / 图片" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#A0AEC0;dashed=1;fontSize=10;fontColor=#718096;exitX=1;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_FS_HANDLER" target="N_FEISHU_API">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 边：Handler → AgentRouter ===== -->
+        <mxCell id="E_FS_H_ROUTER" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0.4;exitY=1;exitDx=0;exitDy=0;entryX=0.3;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_FS_HANDLER" target="N_ROUTER">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_WX_H_ROUTER" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0.6;exitY=1;exitDx=0;exitDy=0;entryX=0.7;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_WX_HANDLER" target="N_ROUTER">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 边：AgentRouter → CLI 客户端 (青色强调) ===== -->
+        <mxCell id="E_ROUTER_CODEX" value="chat / chat_stream" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2C7A7B;fontSize=10;fontColor=#2C7A7B;strokeWidth=2;exitX=0.2;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_ROUTER" target="N_CODEX_CLI">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_ROUTER_CLAUDE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2C7A7B;fontSize=10;fontColor=#2C7A7B;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_ROUTER" target="N_CLAUDE_CLI">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_ROUTER_QODER" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2C7A7B;fontSize=10;fontColor=#2C7A7B;strokeWidth=2;exitX=0.8;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_ROUTER" target="N_QODER_CLI">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 边：CLI → 子进程 ===== -->
+        <mxCell id="E_CODEX_PROC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_CODEX_CLI" target="N_CODEX_PROC">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_CLAUDE_PROC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_CLAUDE_CLI" target="N_CLAUDE_PROC">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="E_QODER_PROC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#4A5568;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="N_QODER_CLI" target="N_QODER_PROC">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

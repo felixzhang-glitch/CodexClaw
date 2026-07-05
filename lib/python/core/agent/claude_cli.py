@@ -222,11 +222,10 @@ class ClaudeCliClient:
 
     def cancel(self, trace_id: str) -> bool:
         with self._process_lock:
-            self._cancel_requests.add(trace_id)
             process = self._active_processes.get(trace_id)
-
-        if process is None:
-            return False
+            if process is None:
+                return False
+            self._cancel_requests.add(trace_id)
 
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):

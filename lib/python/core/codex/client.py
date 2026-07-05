@@ -188,11 +188,10 @@ class CodexClient:
 
     def cancel(self, trace_id: str) -> bool:
         with self._process_lock:
-            self._cancel_requests.add(trace_id)
             process = self._active_processes.get(trace_id)
-
-        if process is None:
-            return False
+            if process is None:
+                return False
+            self._cancel_requests.add(trace_id)
 
         if process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
@@ -204,6 +203,7 @@ class CodexClient:
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
+        deadline = time.monotonic() + self._settings.codex_timeout_seconds
 
         completed_message = ""
         fallback_parts: list[str] = []
@@ -213,7 +213,7 @@ class CodexClient:
         try:
             while True:
                 self._raise_if_cancelled(trace_id)
-                line = await self._readline_with_timeout(process.stdout)
+                line = await self._readline_before_deadline(process.stdout, deadline=deadline)
                 if not line:
                     break
 
@@ -264,6 +264,7 @@ class CodexClient:
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
+        deadline = time.monotonic() + self._settings.codex_timeout_seconds
 
         saw_incremental = False
         completed_message = ""
@@ -274,7 +275,7 @@ class CodexClient:
         try:
             while True:
                 self._raise_if_cancelled(trace_id)
-                line = await self._readline_with_timeout(process.stdout)
+                line = await self._readline_before_deadline(process.stdout, deadline=deadline)
                 if not line:
                     break
 
@@ -372,10 +373,13 @@ class CodexClient:
             limit=self._settings.codex_stream_read_limit_bytes,
         )
 
-    async def _readline_with_timeout(self, stream: asyncio.StreamReader | None) -> bytes:
+    async def _readline_before_deadline(self, stream: asyncio.StreamReader | None, *, deadline: float) -> bytes:
         if stream is None:
             return b""
-        return await asyncio.wait_for(stream.readline(), timeout=self._settings.codex_timeout_seconds)
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            raise asyncio.TimeoutError
+        return await asyncio.wait_for(stream.readline(), timeout=remaining_seconds)
 
     async def _read_stream_text(self, stream: asyncio.StreamReader | None) -> str:
         if stream is None:

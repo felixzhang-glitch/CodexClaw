@@ -53,7 +53,7 @@ class ReminderScheduler:
             task = asyncio.create_task(self._run(reminder))
             self._reminders[reminder.reminder_id] = reminder
             self._tasks[reminder.reminder_id] = task
-            self._save_reminders_unlocked()
+            await self._save_reminders_unlocked()
 
         return reminder
 
@@ -61,7 +61,7 @@ class ReminderScheduler:
         async with self._lock:
             reminder = self._reminders.pop(reminder_id, None)
             task = self._tasks.pop(reminder_id, None)
-            self._save_reminders_unlocked()
+            await self._save_reminders_unlocked()
 
         if task is not None:
             task.cancel()
@@ -93,18 +93,17 @@ class ReminderScheduler:
         except asyncio.CancelledError:
             raise
         except Exception:
-            remove_on_exit = True
             logger.exception(
                 "failed to deliver reminder",
                 extra={"trace_id": reminder.reminder_id, "event": "reminder.error"},
             )
+            # Keep the reminder so it can be retried on next startup.
         finally:
-            if not remove_on_exit:
-                return
             async with self._lock:
                 self._tasks.pop(reminder.reminder_id, None)
-                self._reminders.pop(reminder.reminder_id, None)
-                self._save_reminders_unlocked()
+                if remove_on_exit:
+                    self._reminders.pop(reminder.reminder_id, None)
+                await self._save_reminders_unlocked()
 
     def _load_reminders(self) -> list[Reminder]:
         if self._store_path is None or not self._store_path.exists():
@@ -128,11 +127,8 @@ class ReminderScheduler:
                 reminders.append(reminder)
         return reminders
 
-    def _save_reminders_unlocked(self) -> None:
-        if self._store_path is None:
-            return
-
-        payload = [
+    def _build_reminders_payload(self) -> list[dict[str, Any]]:
+        return [
             {
                 "reminder_id": reminder.reminder_id,
                 "chat_id": reminder.chat_id,
@@ -143,6 +139,14 @@ class ReminderScheduler:
             for reminder in self._reminders.values()
         ]
 
+    async def _save_reminders_unlocked(self) -> None:
+        if self._store_path is None:
+            return
+
+        payload = self._build_reminders_payload()
+        await asyncio.to_thread(self._write_reminders_payload, payload)
+
+    def _write_reminders_payload(self, payload: list[dict[str, Any]]) -> None:
         try:
             self._store_path.parent.mkdir(parents=True, exist_ok=True)
             temp_path = self._store_path.with_suffix(f"{self._store_path.suffix}.tmp")

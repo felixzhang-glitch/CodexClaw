@@ -28,7 +28,7 @@ CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 - 定时提醒 `/remind 10m 内容`，支持 `s/m/h/d`
 
 **回复体验**
-- streaming 增量回传 + 快速回执（`Typing` reaction）
+- 流式获取 + 快速回执（Typing reaction），最终答案汇总后单条回复
 - 最终答案默认单条回复，超长时智能分段（保留段落与代码块边界）
 - 飞书 Markdown 卡片渲染，失败自动降级为纯文本
 - 自动识别 CLI 输出中的本地图片路径并上传为飞书图片消息
@@ -37,7 +37,7 @@ CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 - 超时 / 重试 / 熔断（Codex 客户端）
 - 结构化 JSON 日志（`trace_id` / `event` / `duration_ms` / `error_code`）
 - 回复失败时按 `chat_id` 主动发送兜底
-- 服务控制脚本（`start|stop|status|help`）
+- 服务控制脚本（`start|stop|restart|status|wx|help`）
 
 ## 快速开始
 
@@ -62,6 +62,7 @@ CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 ./bin/server status     # 查看状态
 ./bin/server stop       # 停止
 ./bin/server start -f   # 前台启动
+./bin/server restart    # 重启服务
 ```
 
 > `./bin/start` 等价 `./bin/server start`，`./bin/start -f` 等价 `./bin/server start -f`。
@@ -115,7 +116,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 - CodexClaw：`http://127.0.0.1:8080/webhook/wechat`
 - sidecar health：`http://127.0.0.1:8787/healthz`
 
-> 当前微信版本支持私聊文本、语音转文字文本及全部命令；图片、文件、typing 和定时提醒后续再补。
+> 当前微信版本支持私聊文本、语音转文字文本及全部命令；图片、文件、typing、长任务通知和定时提醒后续再补。
 
 ## 命令
 
@@ -130,8 +131,8 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 | `/codex` | 切换后端为 Codex CLI |
 | `/claude` | 切换后端为 Claude Code |
 | `/qodercli` | 切换后端为 Qoder CLI |
-| `/skills` | 列出本机可用 skills（自然语言询问"列出所有可用 skills"同样触发） |
-| `/remind 10m 喝水` | 定时提醒，时间单位支持 `s/m/h/d` |
+| `/skills` | 列出本机可用 skills |
+| `/remind 10m 喝水` | 定时提醒，时间单位支持 `s/m/h/d`（`/timer` 同义） |
 
 > 后端切换成功后会清空当前会话历史，避免旧后端的工具、skills 或回答风格污染新后端。
 
@@ -145,6 +146,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 |------|--------|------|
 | `FEISHU_APP_ID` | | 应用 ID |
 | `FEISHU_APP_SECRET` | | 应用 Secret |
+| `FEISHU_API_BASE` | `https://open.feishu.cn` | 飞书 API 基址 |
 | `FEISHU_VERIFICATION_TOKEN` | | 验证 Token（可选） |
 | `FEISHU_ENCRYPT_KEY` | | 加密 Key，配置后启用签名校验 |
 | `FEISHU_BOT_OPEN_ID` | | 可选，配置后群聊只响应 @ 该 open_id |
@@ -159,10 +161,13 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 |------|--------|------|
 | `CODEX_CLI_BIN` | `codex` | codex 二进制路径 |
 | `CODEX_WORK_DIR` | `./runtime/codex-workdir` | 工作目录（claude/qodercli 用其下子目录） |
+| `CODEX_GENERATED_IMAGES_DIR` | `~/.codex/generated_images` | Codex 生成图片目录（用于自动上传） |
 | `CODEX_MODEL` | | 可空，留空用 CLI 默认模型 |
 | `CODEX_PERMISSION_MODE` | `full` | 权限模式 |
 | `CODEX_TIMEOUT_SECONDS` | `30` | 单次读取 stdout 超时 |
 | `CODEX_STREAM_READ_LIMIT_BYTES` | `262144` | subprocess stream 读取上限 |
+| `CODEX_MAX_RETRIES` | `2` | Codex CLI 重试次数 |
+| `CODEX_RETRY_BACKOFF_SECONDS` | `1.0` | Codex CLI 重试退避 |
 | `CODEX_CIRCUIT_BREAKER_THRESHOLD` | `5` | 熔断阈值 |
 | `CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS` | `30` | 熔断冷却 |
 

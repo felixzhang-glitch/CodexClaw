@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -9,29 +10,19 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from app.commands import process_command
+from app.commands import build_help_text, parse_reminder_command, process_command
 from app.config import Settings
 from channel.feishu.formatting import normalize_reply_text, split_message_text
-from core.codex.client import CodexClient, CodexClientCancelled, CodexClientError
+from core.agent.claude_cli import ClaudeCliClient
+from core.agent.types import BackendClient
+from core.codex.client import CodexClientCancelled
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
 from core.session.task_registry import ActiveTaskRegistry
 
 logger = logging.getLogger(__name__)
 
-WECHAT_HELP_TEXT = (
-    "可用命令:\n"
-    "/help - 查看帮助\n"
-    "/new - 新建会话（不继承历史）\n"
-    "/reset - 清空当前会话上下文\n"
-    "/compact - 压缩当前会话上下文（保留最近 2 轮）\n"
-    "/stop - 终止当前正在运行的任务\n"
-    "/backend - 查看当前后端及可切换列表\n"
-    "/codex - 切换后端为 Codex CLI\n"
-    "/claude - 切换后端为 Claude Code\n"
-    "/qodercli - 切换后端为 Qoder CLI\n"
-    "/skills - 列出本机可用 skills"
-)
+WECHAT_HELP_TEXT = build_help_text(include_remind=False)
 
 
 @dataclass(slots=True)
@@ -47,7 +38,7 @@ class WeChatWebhookHandler:
     def __init__(
         self,
         settings: Settings,
-        codex_client: CodexClient,
+        codex_client: BackendClient,
         session_manager: SessionManager,
         deduplicator: MessageDeduplicator,
         task_registry: ActiveTaskRegistry,
@@ -92,6 +83,10 @@ class WeChatWebhookHandler:
         if active_task is not None:
             return self._split_reply("当前已有任务在运行中。发送 /stop 可强制终止后再试。")
 
+        reminder = parse_reminder_command(event.text)
+        if reminder is not None:
+            return self._split_reply("微信渠道暂不支持定时提醒，请通过飞书使用 /remind 命令。")
+
         command = process_command(
             event.text,
             session_manager=self._sessions,
@@ -100,6 +95,12 @@ class WeChatWebhookHandler:
         )
         if command is not None:
             return self._split_reply(command.reply_text)
+
+        if normalized_text == "/skills":
+            skills = await asyncio.to_thread(ClaudeCliClient._build_skill_summary)
+            if not skills:
+                return self._split_reply("当前本机未发现可用 skills。")
+            return self._split_reply(f"当前本机可用 skills:\n{skills}")
 
         history_messages = self._sessions.build_messages(session_key)
         messages = history_messages + [{"role": "user", "content": event.text}]
@@ -129,7 +130,7 @@ class WeChatWebhookHandler:
         except CodexClientCancelled:
             logger.info("wechat message cancelled by user", extra={"trace_id": trace_id, "event": "wechat.cancel"})
             return self._split_reply("当前任务已终止。")
-        except (CodexClientError, Exception):
+        except Exception:
             logger.exception("failed to process wechat message", extra={"trace_id": trace_id, "event": "wechat.error"})
             return self._split_reply("服务繁忙，请稍后重试。")
         finally:

@@ -100,9 +100,6 @@ description: "查询全球股票行情。"
     manager = SessionManager(max_history_rounds=10)
     key = SessionManager.build_key("u1", "c1")
 
-    result = process_command("列出你的所有可用 skills", manager, key)
+    result = process_command("/skills", manager, key)
 
-    assert result is not None
-    assert result.handled is True
-    assert "当前本机可用 skills" in result.reply_text
-    assert "`yfinance`" in result.reply_text
+    assert result is None  # /skills is now handled in the handler layer, not process_command

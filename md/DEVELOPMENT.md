@@ -34,45 +34,75 @@ CodexClaw 是一个 Feishu/WeChat 私聊机器人后端服务，核心职责：
 
 ---
 
-## 2. 目录结构
+## 2. 文件树
 
 ```text
-lib/python/app/
-  config.py          # 环境变量与配置
-  logging.py         # JSON 结构化日志
-  commands.py        # /help /new /reset /stop /backend /codex /claude /qodercli
-  main.py            # FastAPI 入口
-
-lib/python/channel/feishu/
-  models.py          # Feishu 事件解析模型
-  security.py        # 签名校验与解密
-  client.py          # Feishu OpenAPI 调用（reply/reaction/token）
-  handler.py         # Feishu webhook 主处理流程
-
-lib/python/channel/wechat/
-  handler.py         # WeChat webhook 处理流程
-
-lib/python/core/agent/
-  router.py          # 多后端路由（codex/claude/qodercli），运行时切换 + 持久化
-  claude_cli.py      # Claude Code 族 CLI 客户端（claude / qodercli）
-
-lib/python/core/codex/
-  client.py          # 本机 codex CLI 调用封装（超时/重试/熔断）
-
-lib/python/core/session/
-  manager.py         # 会话存储与 FIFO 裁剪
-  deduplicator.py    # message_id 去重
-  task_registry.py   # 运行中任务注册与取消
-  reminder_scheduler.py # 单实例内存定时提醒
-
-tests/               # 单元测试
-
-server               # 服务控制脚本（start/stop/status/help）
-start                # 快捷入口（默认后台，-f 前台）
-start.sh             # 兼容入口（转发到 start）
-conf/.env.example    # 示例配置
-README.md            # 用户使用说明
-DEVELOPMENT.md       # 本文档
+CodexClaw/
+|-- README.md                         # 用户使用说明
+|-- architecture.drawio                # 架构图源文件
+|-- architecture.svg                   # 架构图导出文件
+|-- bin/
+|   |-- server                         # 服务控制脚本（start/stop/status/help/wx）
+|   |-- start                          # 快捷入口（默认后台，-f 前台）
+|   `-- start.sh                       # 兼容入口（转发到 start）
+|-- conf/
+|   |-- .env.example                   # 示例配置
+|   |-- pytest.ini                     # pytest 配置
+|   `-- requirements.txt               # Python 运行与测试依赖
+|-- lib/
+|   |-- js/
+|   |   `-- wechat-sidecar.mjs         # WeChat iLink Bot 长轮询 sidecar
+|   `-- python/
+|       |-- app/
+|       |   |-- __init__.py
+|       |   |-- commands.py            # /help /new /reset /stop /backend /skills 等命令
+|       |   |-- config.py              # 环境变量与配置
+|       |   |-- logging.py             # JSON 结构化日志
+|       |   `-- main.py                # FastAPI 入口与 webhook 路由
+|       |-- channel/
+|       |   |-- __init__.py
+|       |   |-- feishu/
+|       |   |   |-- __init__.py
+|       |   |   |-- client.py          # Feishu OpenAPI 调用（reply/send/image/reaction/token）
+|       |   |   |-- formatting.py      # Feishu 文本/Markdown 格式化与分段
+|       |   |   |-- handler.py         # Feishu webhook 主处理流程
+|       |   |   |-- media.py           # Feishu 图片下载、上传与本地路径识别
+|       |   |   |-- models.py          # Feishu 事件解析模型
+|       |   |   `-- security.py        # 签名校验与解密
+|       |   `-- wechat/
+|       |       |-- __init__.py
+|       |       `-- handler.py         # WeChat webhook 处理流程
+|       `-- core/
+|           |-- __init__.py
+|           |-- agent/
+|           |   |-- __init__.py
+|           |   |-- claude_cli.py      # Claude Code 族 CLI 客户端（claude / qodercli）
+|           |   `-- router.py          # 多后端路由、运行时切换与持久化
+|           |-- codex/
+|           |   |-- __init__.py
+|           |   `-- client.py          # 本机 codex CLI 调用封装（超时/重试/熔断）
+|           `-- session/
+|               |-- __init__.py
+|               |-- deduplicator.py     # message_id 去重
+|               |-- manager.py          # 会话存储与 FIFO 裁剪
+|               |-- reminder_scheduler.py # 单实例定时提醒与持久化
+|               `-- task_registry.py    # 运行中任务注册与取消
+|-- md/
+|   `-- DEVELOPMENT.md                  # 本文档
+`-- tests/
+    |-- conftest.py                     # 测试夹具与路径初始化
+    |-- test_claude_cli.py              # Claude/qodercli 客户端解析与调用测试
+    |-- test_codex_streaming_mock.py    # Codex streaming mock 测试
+    |-- test_feishu_formatting.py       # Feishu 格式化与分段测试
+    |-- test_feishu_media.py            # Feishu 图片媒体处理测试
+    |-- test_feishu_reaction.py         # quick ack reaction 测试
+    |-- test_handler_single_reply.py    # 单条最终回复行为测试
+    |-- test_message_parsing.py         # 消息解析测试
+    |-- test_new_command.py             # /new 命令测试
+    |-- test_reminder_scheduler.py      # 定时提醒调度测试
+    |-- test_session_manager.py         # 会话管理测试
+    |-- test_signature_validation.py    # Feishu 签名校验测试
+    `-- test_wechat_handler.py          # WeChat handler 测试
 ```
 
 ---
@@ -273,7 +303,7 @@ codex exec --skip-git-repo-check --json -C <CODEX_WORK_DIR>
 
 命令在 `commands.py:process_command` 中处理，需传入 `router` 参数（两个 handler 均已适配）。后端切换成功后会清空当前会话历史，避免旧后端的工具、skills 或回答内容继续进入新后端 prompt。
 
-`/skills` 以及“列出所有可用 skills”这类自然语言请求也在 `process_command` 中直接处理：服务扫描本机 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills` 下的 `SKILL.md`，返回确定性清单，不交给模型自由总结。
+`/skills` 命令在 handler 层异步处理（通过 `asyncio.to_thread` 避免阻塞事件循环）：服务扫描本机 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills` 下的 `SKILL.md`，返回确定性清单，不交给模型自由总结。
 
 ### 7.4 Claude Code 族 CLI 适配
 
@@ -439,3 +469,4 @@ pytest -c conf/pytest.ini -q
 4. 增加 `/status` 命令，返回当前任务状态、已运行时长、是否已收到停止请求。
 5. 增加 Prometheus 指标与健康探针细分。
 6. 增加集成测试（Mock Feishu webhook + Mock codex CLI）。
+7. 后端工作目录完全隔离：当前 codex 后端使用 `CODEX_WORK_DIR` 根目录，claude/qodercli 使用其下子目录，codex 在 `full` 权限下可读写其他后端子目录。建议改为每个后端使用完全独立的根目录（如 `codex-workdir-codex/`、`codex-workdir-claude/`），避免文件交叉污染。

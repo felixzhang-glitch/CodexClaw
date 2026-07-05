@@ -32,7 +32,9 @@ from channel.feishu.security import (
     decrypt_event_payload,
     verify_request_signature,
 )
-from core.codex.client import CodexClient, CodexClientCancelled, CodexClientError
+from core.agent.claude_cli import ClaudeCliClient
+from core.agent.types import BackendClient
+from core.codex.client import CodexClientCancelled
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
 from core.session.reminder_scheduler import ReminderScheduler
@@ -46,7 +48,7 @@ class FeishuWebhookHandler:
         self,
         settings: Settings,
         feishu_client: FeishuClient,
-        codex_client: CodexClient,
+        codex_client: BackendClient,
         session_manager: SessionManager,
         deduplicator: MessageDeduplicator,
         task_registry: ActiveTaskRegistry,
@@ -59,6 +61,7 @@ class FeishuWebhookHandler:
         self._deduplicator = deduplicator
         self._task_registry = task_registry
         self._reminder_scheduler = reminder_scheduler
+        self._downloaded_image_paths: list[str] = []
 
     async def handle_webhook(self, headers: Mapping[str, str], raw_body: bytes) -> dict[str, Any]:
         trace_id = uuid.uuid4().hex
@@ -158,6 +161,21 @@ class FeishuWebhookHandler:
             )
             return
 
+        if normalized_text == "/skills":
+            skills = await asyncio.to_thread(ClaudeCliClient._build_skill_summary)
+            if not skills:
+                reply = "当前本机未发现可用 skills。"
+            else:
+                reply = f"当前本机可用 skills:\n{skills}"
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text=reply,
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-skills",
+            )
+            return
+
         history_messages = self._sessions.build_messages(session_key)
         messages = history_messages + [{"role": "user", "content": user_text}]
         started = self._task_registry.start(
@@ -185,7 +203,7 @@ class FeishuWebhookHandler:
         )
         generated_since = time.time()
         delivered_image_paths: list[str] = []
-        auto_complete_on_image = self._looks_like_image_request(user_text)
+        auto_complete_on_image = self._looks_like_image_request(event.text)
         image_watch_task: asyncio.Task[None] | None = None
         if auto_complete_on_image:
             image_watch_task = asyncio.create_task(
@@ -215,7 +233,7 @@ class FeishuWebhookHandler:
                 generated_images = []
                 if auto_complete_on_image:
                     generated_images = self._filter_unsent_images(
-                        self._find_generated_images_since(generated_since),
+                        await asyncio.to_thread(self._find_generated_images_since, generated_since),
                         delivered_image_paths,
                     )
                 if not answer.strip() and generated_images:
@@ -248,7 +266,7 @@ class FeishuWebhookHandler:
                 text="当前任务已终止。",
                 trace_id=trace_id,
             )
-        except (CodexClientError, FeishuClientError, Exception):
+        except Exception:
             logger.exception("failed to process message", extra={"trace_id": trace_id, "event": "pipeline.error"})
             await self._safe_reply(
                 message_id=event.message_id,
@@ -262,6 +280,7 @@ class FeishuWebhookHandler:
             if image_watch_task is not None:
                 await self._finish_image_watch_task(image_watch_task, delivered_image_paths)
             self._task_registry.finish(key=session_key, trace_id=trace_id)
+            self._cleanup_downloaded_images()
 
     async def _stream_to_feishu(
         self,
@@ -284,7 +303,7 @@ class FeishuWebhookHandler:
         generated_images = []
         if include_recent_generated_images:
             generated_images = self._filter_unsent_images(
-                self._find_generated_images_since(generated_since),
+                await asyncio.to_thread(self._find_generated_images_since, generated_since),
                 already_sent,
             )
         if not answer:
@@ -433,7 +452,9 @@ class FeishuWebhookHandler:
         safe_image_key = self._safe_filename_part(image_key)[:32]
         image_path = directory / f"{safe_message_id}-{safe_image_key}{suffix}"
         image_path.write_bytes(image_bytes)
-        return os.path.abspath(image_path)
+        absolute_path = os.path.abspath(image_path)
+        self._downloaded_image_paths.append(absolute_path)
+        return absolute_path
 
     @staticmethod
     def _image_suffix_from_content_type(content_type: str) -> str:
@@ -529,7 +550,7 @@ class FeishuWebhookHandler:
             while True:
                 await asyncio.sleep(1.0)
                 image_paths = self._filter_unsent_images(
-                    self._find_generated_images_since(generated_since),
+                    await asyncio.to_thread(self._find_generated_images_since, generated_since),
                     delivered_image_paths,
                 )
                 for image_path in image_paths:
@@ -639,6 +660,14 @@ class FeishuWebhookHandler:
             request_uuid=f"{request_uuid}-send" if request_uuid else None,
         )
 
+    def _cleanup_downloaded_images(self) -> None:
+        for image_path in self._downloaded_image_paths:
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
+        self._downloaded_image_paths.clear()
+
     async def _safe_reply(
         self,
         message_id: str,
@@ -687,7 +716,17 @@ class FeishuWebhookHandler:
             chunk_uuid = request_uuid
             if request_uuid:
                 chunk_uuid = f"{request_uuid}-part-{idx}"
-            await self._send_chat_text(chat_id=chat_id, text=chunk, trace_id=trace_id, request_uuid=chunk_uuid)
+            try:
+                await self._send_chat_text(chat_id=chat_id, text=chunk, trace_id=trace_id, request_uuid=chunk_uuid)
+            except FeishuClientError:
+                logger.warning(
+                    "all reply methods failed for chunk",
+                    extra={
+                        "trace_id": trace_id,
+                        "event": "feishu.reply_all_failed",
+                        "request_uuid": chunk_uuid,
+                    },
+                )
 
     async def _send_chat_text(
         self,
@@ -722,13 +761,23 @@ class FeishuWebhookHandler:
                         "error_code": type(exc).__name__,
                     },
                 )
-                await self._feishu_client.send_text(
-                    receive_id=chat_id,
-                    receive_id_type="chat_id",
-                    text=chunk,
-                    trace_id=trace_id,
-                    request_uuid=chunk_uuid,
-                )
+                try:
+                    await self._feishu_client.send_text(
+                        receive_id=chat_id,
+                        receive_id_type="chat_id",
+                        text=chunk,
+                        trace_id=trace_id,
+                        request_uuid=chunk_uuid,
+                    )
+                except FeishuClientError:
+                    logger.warning(
+                        "text send also failed",
+                        extra={
+                            "trace_id": trace_id,
+                            "event": "feishu.send_text_failed",
+                            "error_code": type(exc).__name__,
+                        },
+                    )
 
     async def _send_quick_ack(self, message_id: str, trace_id: str) -> None:
         try:
@@ -750,6 +799,12 @@ class FeishuWebhookHandler:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         has_signature = any(key.lower() == "x-lark-signature" for key in headers)
+        if not has_signature and "encrypt" not in payload:
+            if not self._settings.feishu_verification_token:
+                raise HTTPException(
+                    status_code=401,
+                    detail="no signature, encryption, or verification token configured",
+                )
         if has_signature:
             if not self._settings.feishu_encrypt_key:
                 raise HTTPException(status_code=401, detail="missing FEISHU_ENCRYPT_KEY for signature validation")

@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from core.agent.claude_cli import ClaudeCliClient
 from core.session.manager import SessionManager
 
 HELP_TEXT = (
@@ -21,6 +20,27 @@ HELP_TEXT = (
     "/skills - 列出本机可用 skills\n"
     "/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）"
 )
+
+
+def build_help_text(*, include_remind: bool = True) -> str:
+    lines = [
+        "可用命令:",
+        "/help - 查看帮助",
+        "/new - 新建会话（不继承历史）",
+        "/reset - 清空当前会话上下文",
+        "/compact - 压缩当前会话上下文（保留最近 2 轮）",
+        "/stop - 终止当前正在运行的任务",
+        "/backend - 查看当前后端及可切换列表",
+        "/codex - 切换后端为 Codex CLI",
+        "/claude - 切换后端为 Claude Code",
+        "/qodercli - 切换后端为 Qoder CLI",
+        "/skills - 列出本机可用 skills",
+    ]
+    if include_remind:
+        lines.append("/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）")
+    else:
+        lines.append("/remind - 微信渠道暂不支持")
+    return "\n".join(lines)
 
 BACKEND_COMMANDS: dict[str, str] = {
     "/codex": "codex",
@@ -51,12 +71,6 @@ def process_command(
 
     if text == "/help":
         return CommandResult(handled=True, reply_text=HELP_TEXT)
-
-    if text == "/skills" or _looks_like_skill_list_request(raw_text):
-        skills = ClaudeCliClient._build_skill_summary()
-        if not skills:
-            return CommandResult(handled=True, reply_text="当前本机未发现可用 skills。")
-        return CommandResult(handled=True, reply_text=f"当前本机可用 skills:\n{skills}")
 
     if text == "/new":
         session_id = session_manager.new_session(session_key)
@@ -91,15 +105,6 @@ def process_command(
             return CommandResult(handled=True, reply_text=f"切换失败: 未知后端 {target}。")
 
     return None
-
-
-def _looks_like_skill_list_request(raw_text: str) -> bool:
-    normalized = raw_text.strip().lower()
-    if "skill" not in normalized:
-        return False
-    list_intents = ("列出", "所有", "全部", "可用", "有哪些", "能力", "清单", "列表")
-    return any(intent in normalized for intent in list_intents)
-
 
 
 def parse_reminder_command(raw_text: str) -> ReminderCommand | None:

@@ -505,7 +505,7 @@ class FeishuClient:
                 return response, data
 
             if response.status_code == 401:
-                self._clear_tenant_access_token()
+                await self._clear_tenant_access_token()
                 if attempt < attempts:
                     logger.warning(
                         "retrying feishu request after token rejection",
@@ -568,7 +568,7 @@ class FeishuClient:
                 return response, data_json
 
             if response.status_code == 401:
-                self._clear_tenant_access_token()
+                await self._clear_tenant_access_token()
                 if attempt < attempts:
                     await self._sleep_before_retry(attempt)
                     continue
@@ -624,7 +624,7 @@ class FeishuClient:
 
             data = self._try_parse_json(response)
             if response.status_code == 401:
-                self._clear_tenant_access_token()
+                await self._clear_tenant_access_token()
                 if attempt < attempts:
                     await self._sleep_before_retry(attempt)
                     continue
@@ -688,9 +688,10 @@ class FeishuClient:
 
         raise FeishuClientError(f"feishu request failed: {last_error}")
 
-    def _clear_tenant_access_token(self) -> None:
-        self._tenant_access_token = ""
-        self._token_expire_at = 0.0
+    async def _clear_tenant_access_token(self) -> None:
+        async with self._token_lock:
+            self._tenant_access_token = ""
+            self._token_expire_at = 0.0
 
     def _retry_attempts(self) -> int:
         return max(0, int(getattr(self._settings, "feishu_max_retries", 2) or 0))

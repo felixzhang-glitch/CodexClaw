@@ -1,0 +1,66 @@
+version: 1
+last_commit: "9e9a7c072f3876e2263c163f42e871bd17047453"
+last_generated: "2026-07-05T19:00:00+08:00"
+pages:
+  - path: "01-系统架构.md"
+    title: "系统架构总览"
+    source_files:
+      - "lib/python/"
+      - "lib/js/"
+      - "conf/"
+      - "bin/"
+  - path: "02-模块详解/应用入口与配置.md"
+    title: "应用入口与配置"
+    source_files:
+      - "lib/python/app/"
+  - path: "02-模块详解/飞书渠道.md"
+    title: "飞书渠道"
+    source_files:
+      - "lib/python/channel/feishu/"
+  - path: "02-模块详解/微信渠道.md"
+    title: "微信渠道"
+    source_files:
+      - "lib/python/channel/wechat/"
+  - path: "02-模块详解/Codex后端客户端.md"
+    title: "Codex后端客户端"
+    source_files:
+      - "lib/python/core/codex/"
+  - path: "02-模块详解/多后端路由.md"
+    title: "多后端路由"
+    source_files:
+      - "lib/python/core/agent/"
+  - path: "02-模块详解/会话与任务管理.md"
+    title: "会话与任务管理"
+    source_files:
+      - "lib/python/core/session/"
+  - path: "02-模块详解/服务控制与Sidecar.md"
+    title: "服务控制与Sidecar"
+    source_files:
+      - "bin/"
+      - "lib/js/"
+  - path: "03-核心流程与API/飞书消息处理流程.md"
+    title: "飞书消息处理流程"
+    source_files:
+      - "lib/python/channel/feishu/handler.py"
+      - "lib/python/app/commands.py"
+  - path: "03-核心流程与API/微信消息处理流程.md"
+    title: "微信消息处理流程"
+    source_files:
+      - "lib/python/channel/wechat/handler.py"
+      - "lib/js/wechat-sidecar.mjs"
+  - path: "03-核心流程与API/多后端路由与切换流程.md"
+    title: "多后端路由与切换流程"
+    source_files:
+      - "lib/python/core/agent/router.py"
+      - "lib/python/app/commands.py"
+  - path: "03-核心流程与API/定时提醒流程.md"
+    title: "定时提醒流程"
+    source_files:
+      - "lib/python/core/session/reminder_scheduler.py"
+      - "lib/python/app/commands.py"
+      - "lib/python/app/main.py"
+  - path: "03-核心流程与API/会话记忆与压缩流程.md"
+    title: "会话记忆与压缩流程"
+    source_files:
+      - "lib/python/core/session/manager.py"
+      - "lib/python/app/commands.py"
