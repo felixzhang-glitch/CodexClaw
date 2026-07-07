@@ -1,12 +1,12 @@
 # CodexClaw
 
-飞书/微信 私聊机器人 → 本机 Codex / Claude / Qoder CLI，运行时可切换后端。
+飞书/微信 私聊机器人 → 本机 OpenCode / Codex / Claude / Qoder CLI，运行时可切换后端。
 
 <img width="818" height="1456" alt="image" src="https://github.com/user-attachments/assets/4d78591b-1c42-44e9-a772-0c5c38921b5d" />
 
 ## 概述
 
-CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私聊消息，调用本机已安装的 AI CLI 后端（`codex`、`claude`、`qodercli`）处理后回传。核心设计是 **运行时多后端路由**——通过聊天命令即可切换后端，切换状态持久化，重启保留。
+CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私聊消息，调用本机已安装的 AI CLI 后端（`opencode`、`codex`、`claude`、`qodercli`）处理后回传。核心设计是 **运行时多后端路由**——通过聊天命令即可切换后端，切换状态持久化，重启保留。默认后端为 `opencode`。
 
 ### 功能特性
 
@@ -17,9 +17,9 @@ CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 - 群聊 @ 机器人触发（默认要求 @）
 
 **多后端路由**
-- `codex` / `claude` / `qodercli` 三后端，运行时通过 `/codex` `/claude` `/qodercli` 切换
+- `opencode` / `codex` / `claude` / `qodercli` 四后端，运行时通过 `/opencode` `/codex` `/claude` `/qodercli` 切换
 - 状态持久化（`runtime/server/backend.json`，重启保留）
-- 切换隔离：清空当前会话上下文 + claude/qodercli 使用独立工作目录
+- 切换隔离：清空当前会话上下文 + claude/qodercli/opencode 使用独立工作目录
 
 **会话与任务**
 - 会话记忆（`user_id + chat_id` 维度，默认 10 轮 FIFO 裁剪）
@@ -128,6 +128,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 | `/compact` | 压缩会话上下文，保留最近 2 轮（`/compress` 同义） |
 | `/stop` | 终止当前会话中正在运行的任务 |
 | `/backend` | 查看当前后端及可切换列表 |
+| `/opencode` | 切换后端为 OpenCode CLI（默认） |
 | `/codex` | 切换后端为 Codex CLI |
 | `/claude` | 切换后端为 Claude Code |
 | `/qodercli` | 切换后端为 Qoder CLI |
@@ -164,7 +165,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 | `CODEX_GENERATED_IMAGES_DIR` | `~/.codex/generated_images` | Codex 生成图片目录（用于自动上传） |
 | `CODEX_MODEL` | | 可空，留空用 CLI 默认模型 |
 | `CODEX_PERMISSION_MODE` | `full` | 权限模式 |
-| `CODEX_TIMEOUT_SECONDS` | `30` | 单次读取 stdout 超时 |
+| `CODEX_TIMEOUT_SECONDS` | `300` | 单行 stdout idle 超时（沉默 N 秒判超时） |
 | `CODEX_STREAM_READ_LIMIT_BYTES` | `262144` | subprocess stream 读取上限 |
 | `CODEX_MAX_RETRIES` | `2` | Codex CLI 重试次数 |
 | `CODEX_RETRY_BACKOFF_SECONDS` | `1.0` | Codex CLI 重试退避 |
@@ -175,16 +176,21 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ACTIVE_BACKEND` | `codex` | 初始后端（`codex`/`claude`/`qodercli`） |
+| `ACTIVE_BACKEND` | `opencode` | 初始后端（`opencode`/`codex`/`claude`/`qodercli`） |
 | `BACKEND_STATE_PATH` | `./runtime/server/backend.json` | 后端状态持久化 |
+| `OPENCODE_CLI_BIN` | `opencode` | opencode 二进制 |
+| `OPENCODE_MODEL` | | 可空，形如 `provider/model` |
+| `OPENCODE_AGENT` | | 可空，`opencode run --agent` |
+| `OPENCODE_TIMEOUT_SECONDS` | `300` | 兼容字段（不再作为总超时使用） |
+| `OPENCODE_IDLE_TIMEOUT_SECONDS` | `120` | 单行 stdout idle 超时 |
 | `CLAUDE_CLI_BIN` | `claude` | claude 二进制 |
 | `CLAUDE_MODEL` | | 可空 |
 | `CLAUDE_PERMISSION_MODE` | `auto` | root 下 `auto` 为最大权限 |
-| `CLAUDE_TIMEOUT_SECONDS` | `60` | 单次请求总时长上限 |
+| `CLAUDE_TIMEOUT_SECONDS` | `300` | 单行 stdout idle 超时 |
 | `QODERCLI_CLI_BIN` | `qodercli` | qodercli 二进制 |
 | `QODERCLI_MODEL` | | 可空 |
 | `QODERCLI_PERMISSION_MODE` | `dangerously-skip-permissions` | 权限模式 |
-| `QODERCLI_TIMEOUT_SECONDS` | `60` | 单次请求总时长上限 |
+| `QODERCLI_TIMEOUT_SECONDS` | `300` | 单行 stdout idle 超时 |
 
 **运行行为**
 
@@ -223,7 +229,7 @@ lib/python/
   app/                # config / commands / logging / main(FastAPI)
   channel/feishu/     # models / security / client / handler / formatting / media
   channel/wechat/     # handler
-  core/agent/         # router(多后端路由) / claude_cli
+  core/agent/         # router(多后端路由) / claude_cli / opencode_cli
   core/codex/         # client(Codex CLI 封装)
   core/session/       # manager / deduplicator / task_registry / reminder_scheduler
 lib/js/
@@ -253,7 +259,7 @@ pytest -c conf/pytest.ini -q
 | `verification token mismatch` | `FEISHU_VERIFICATION_TOKEN` 不一致 |
 | `failed to fetch tenant access token` | `App ID/Secret` 无效或权限不足 |
 | `codex cli failed` | 本机 `codex` 未登录或不可执行，检查 `codex login` |
-| `codex cli timeout` | 调大 `CODEX_TIMEOUT_SECONDS` |
+| `codex cli timeout` | 调大 `CODEX_TIMEOUT_SECONDS`（当前是 stdout 逐行 idle 超时，仅在流沉默时触发） |
 | `chunk is longer than limit` | 调大 `CODEX_STREAM_READ_LIMIT_BYTES` |
 | `/stop` 未终止任务 | 确认同一会话发送；查日志 `event=pipeline.cancel` |
 

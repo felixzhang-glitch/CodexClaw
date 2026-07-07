@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         validation_alias="CODEX_GENERATED_IMAGES_DIR",
     )
     codex_permission_mode: str = Field(default="full", validation_alias="CODEX_PERMISSION_MODE")
-    codex_timeout_seconds: float = Field(default=30.0, validation_alias="CODEX_TIMEOUT_SECONDS")
+    codex_timeout_seconds: float = Field(default=300.0, validation_alias="CODEX_TIMEOUT_SECONDS")
     codex_stream_read_limit_bytes: int = Field(default=262144, validation_alias="CODEX_STREAM_READ_LIMIT_BYTES")
     codex_max_retries: int = Field(default=2, validation_alias="CODEX_MAX_RETRIES")
     codex_retry_backoff_seconds: float = Field(default=1.0, validation_alias="CODEX_RETRY_BACKOFF_SECONDS")
@@ -48,16 +48,21 @@ class Settings(BaseSettings):
         validation_alias="CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
     )
 
-    active_backend: str = Field(default="codex", validation_alias="ACTIVE_BACKEND")
+    active_backend: str = Field(default="opencode", validation_alias="ACTIVE_BACKEND")
     backend_state_path: str = Field(default="./runtime/server/backend.json", validation_alias="BACKEND_STATE_PATH")
     claude_cli_bin: str = Field(default="claude", validation_alias="CLAUDE_CLI_BIN")
     claude_model: str = Field(default="", validation_alias="CLAUDE_MODEL")
     claude_permission_mode: str = Field(default="auto", validation_alias="CLAUDE_PERMISSION_MODE")
-    claude_timeout_seconds: float = Field(default=60.0, validation_alias="CLAUDE_TIMEOUT_SECONDS")
+    claude_timeout_seconds: float = Field(default=300.0, validation_alias="CLAUDE_TIMEOUT_SECONDS")
     qodercli_cli_bin: str = Field(default="qodercli", validation_alias="QODERCLI_CLI_BIN")
     qodercli_model: str = Field(default="", validation_alias="QODERCLI_MODEL")
     qodercli_permission_mode: str = Field(default="dangerously-skip-permissions", validation_alias="QODERCLI_PERMISSION_MODE")
-    qodercli_timeout_seconds: float = Field(default=60.0, validation_alias="QODERCLI_TIMEOUT_SECONDS")
+    qodercli_timeout_seconds: float = Field(default=300.0, validation_alias="QODERCLI_TIMEOUT_SECONDS")
+    opencode_cli_bin: str = Field(default="opencode", validation_alias="OPENCODE_CLI_BIN")
+    opencode_model: str = Field(default="", validation_alias="OPENCODE_MODEL")
+    opencode_agent: str = Field(default="", validation_alias="OPENCODE_AGENT")
+    opencode_timeout_seconds: float = Field(default=300.0, validation_alias="OPENCODE_TIMEOUT_SECONDS")
+    opencode_idle_timeout_seconds: float = Field(default=120.0, validation_alias="OPENCODE_IDLE_TIMEOUT_SECONDS")
 
     max_history_rounds: int = Field(default=10, validation_alias="MAX_HISTORY_ROUNDS")
     streaming_enabled: bool = Field(default=True, validation_alias="STREAMING_ENABLED")

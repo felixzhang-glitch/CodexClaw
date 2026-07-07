@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 
 from app.config import Settings
 from core.agent.claude_cli import ClaudeCliClient
+from core.agent.opencode_cli import OpenCodeCliClient
 from core.codex.client import CodexClient
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ BACKEND_LABELS: dict[str, str] = {
     "codex": "Codex CLI",
     "claude": "Claude Code",
     "qodercli": "Qoder CLI",
+    "opencode": "OpenCode CLI",
 }
 
 
@@ -53,13 +55,15 @@ class AgentRouter:
             use_verbose=False,
             use_partial_messages=False,
         )
+        opencode = OpenCodeCliClient(settings=settings)
         self._clients: dict[str, object] = {
             "codex": codex,
             "claude": claude,
             "qodercli": qodercli,
+            "opencode": opencode,
         }
 
-        self._active = self._load_active() or self._normalize(settings.active_backend) or "codex"
+        self._active = self._load_active() or self._normalize(settings.active_backend) or "opencode"
 
     @property
     def active(self) -> str:

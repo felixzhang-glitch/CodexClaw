@@ -17,6 +17,7 @@ HELP_TEXT = (
     "/codex - 切换后端为 Codex CLI\n"
     "/claude - 切换后端为 Claude Code\n"
     "/qodercli - 切换后端为 Qoder CLI\n"
+    "/opencode - 切换后端为 OpenCode CLI\n"
     "/skills - 列出本机可用 skills\n"
     "/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）"
 )
@@ -34,6 +35,7 @@ def build_help_text(*, include_remind: bool = True) -> str:
         "/codex - 切换后端为 Codex CLI",
         "/claude - 切换后端为 Claude Code",
         "/qodercli - 切换后端为 Qoder CLI",
+        "/opencode - 切换后端为 OpenCode CLI",
         "/skills - 列出本机可用 skills",
     ]
     if include_remind:
@@ -46,6 +48,7 @@ BACKEND_COMMANDS: dict[str, str] = {
     "/codex": "codex",
     "/claude": "claude",
     "/qodercli": "qodercli",
+    "/opencode": "opencode",
 }
 
 

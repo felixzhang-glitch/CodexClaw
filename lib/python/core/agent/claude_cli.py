@@ -237,7 +237,6 @@ class ClaudeCliClient:
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
-        deadline = time.monotonic() + self._timeout_seconds
 
         completed_message = ""
         fallback_parts: list[str] = []
@@ -246,7 +245,7 @@ class ClaudeCliClient:
         try:
             while True:
                 self._raise_if_cancelled(trace_id)
-                line = await self._readline_before_deadline(process.stdout, deadline=deadline)
+                line = await self._readline_with_idle_timeout(process.stdout)
                 if not line:
                     break
 
@@ -295,7 +294,6 @@ class ClaudeCliClient:
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
         stderr_task = asyncio.create_task(self._read_stream_text(process.stderr))
-        deadline = time.monotonic() + self._timeout_seconds
 
         saw_incremental = False
         completed_message = ""
@@ -305,7 +303,7 @@ class ClaudeCliClient:
         try:
             while True:
                 self._raise_if_cancelled(trace_id)
-                line = await self._readline_before_deadline(process.stdout, deadline=deadline)
+                line = await self._readline_with_idle_timeout(process.stdout)
                 if not line:
                     break
 
@@ -405,6 +403,11 @@ class ClaudeCliClient:
         if remaining_seconds <= 0:
             raise asyncio.TimeoutError
         return await asyncio.wait_for(stream.readline(), timeout=remaining_seconds)
+
+    async def _readline_with_idle_timeout(self, stream: asyncio.StreamReader | None) -> bytes:
+        if stream is None:
+            return b""
+        return await asyncio.wait_for(stream.readline(), timeout=self._timeout_seconds)
 
     async def _read_stream_text(self, stream: asyncio.StreamReader | None) -> str:
         if stream is None:
