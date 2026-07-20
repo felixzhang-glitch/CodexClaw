@@ -11,7 +11,6 @@ class ActiveTask:
     trace_id: str
     message_id: str
     started_at: float = field(default_factory=time.time)
-    notice_sent: bool = False
     cancel_requested: bool = False
 
 
@@ -40,14 +39,6 @@ class ActiveTaskRegistry:
                 return
             self._tasks.pop(key, None)
             self._cancel_callbacks.pop(key, None)
-
-    def mark_notice_sent(self, key: str, trace_id: str) -> bool:
-        with self._lock:
-            task = self._tasks.get(key)
-            if task is None or task.trace_id != trace_id or task.notice_sent:
-                return False
-            task.notice_sent = True
-            return True
 
     def cancel(self, key: str) -> ActiveTask | None:
         with self._lock:

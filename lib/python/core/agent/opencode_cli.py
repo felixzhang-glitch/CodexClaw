@@ -63,6 +63,10 @@ class OpenCodeCliClient:
         self._work_dir = os.path.abspath(os.path.join(settings.codex_work_dir, self._name))
         os.makedirs(self._work_dir, exist_ok=True)
 
+        self._session_store_path = os.path.abspath(settings.opencode_session_store_path)
+        self._session_lock = threading.Lock()
+        self._session_ids: dict[str, str] = self._load_sessions()
+
     @property
     def name(self) -> str:
         return self._name
@@ -70,10 +74,27 @@ class OpenCodeCliClient:
     async def close(self) -> None:
         return None
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+    def reset_backend_session(self, session_key: str) -> None:
+        self.reset_session(session_key)
+
+    def reset_session(self, session_key: str) -> None:
+        with self._session_lock:
+            if session_key in self._session_ids:
+                del self._session_ids[session_key]
+                self._save_sessions()
+
+    async def chat(
+        self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None
+    ) -> str:
         self._assert_circuit_closed()
 
-        prompt = self._build_prompt(messages)
+        session_id = self._get_session_id(session_key)
+        session_holder: dict[str, str] = {}
+        prompt = (
+            self._build_native_prompt(messages, include_preamble=session_id is None)
+            if session_key
+            else self._build_prompt(messages)
+        )
         request_summary = self._summarize_messages(messages)
         attempt = 0
         start = time.monotonic()
@@ -81,8 +102,14 @@ class OpenCodeCliClient:
         try:
             while True:
                 try:
-                    text = await self._run_once(prompt=prompt, trace_id=trace_id, collect_only=True)
+                    text = await self._run_once(
+                        prompt=prompt,
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        session_holder=session_holder,
+                    )
                     self._record_success()
+                    self._persist_session(session_key, session_holder)
                     duration_ms = int((time.monotonic() - start) * 1000)
                     logger.info(
                         "opencode cli chat completed",
@@ -121,16 +148,25 @@ class OpenCodeCliClient:
                         )
                         raise
                     self._raise_if_cancelled(trace_id)
+                    session_id = session_holder.get("id", session_id)
                     await asyncio.sleep(self._settings.codex_retry_backoff_seconds * (2**attempt))
                     self._raise_if_cancelled(trace_id)
                     attempt += 1
         finally:
             self._clear_cancel_request(trace_id)
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str) -> AsyncIterator[str]:
+    async def chat_stream(
+        self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None
+    ) -> AsyncIterator[str]:
         self._assert_circuit_closed()
 
-        prompt = self._build_prompt(messages)
+        session_id = self._get_session_id(session_key)
+        session_holder: dict[str, str] = {}
+        prompt = (
+            self._build_native_prompt(messages, include_preamble=session_id is None)
+            if session_key
+            else self._build_prompt(messages)
+        )
         request_summary = self._summarize_messages(messages)
         attempt = 0
         start = time.monotonic()
@@ -140,13 +176,19 @@ class OpenCodeCliClient:
                 emitted = False
                 preview_parts: list[str] = []
                 try:
-                    async for piece in self._run_stream_once(prompt=prompt, trace_id=trace_id):
+                    async for piece in self._run_stream_once(
+                        prompt=prompt,
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        session_holder=session_holder,
+                    ):
                         emitted = True
                         if len("".join(preview_parts)) < 240:
                             preview_parts.append(piece)
                         yield piece
 
                     self._record_success()
+                    self._persist_session(session_key, session_holder)
                     duration_ms = int((time.monotonic() - start) * 1000)
                     logger.info(
                         "opencode cli stream completed",
@@ -213,6 +255,7 @@ class OpenCodeCliClient:
                         raise
 
                     self._raise_if_cancelled(trace_id)
+                    session_id = session_holder.get("id", session_id)
                     await asyncio.sleep(self._settings.codex_retry_backoff_seconds * (2**attempt))
                     self._raise_if_cancelled(trace_id)
                     attempt += 1
@@ -231,8 +274,15 @@ class OpenCodeCliClient:
                 process.kill()
         return True
 
-    async def _run_stream_once(self, prompt: str, trace_id: str) -> AsyncIterator[str]:
-        command = self._build_command()
+    async def _run_stream_once(
+        self,
+        prompt: str,
+        trace_id: str,
+        *,
+        session_id: str | None = None,
+        session_holder: dict[str, str] | None = None,
+    ) -> AsyncIterator[str]:
+        command = self._build_command(session_id=session_id)
         command.append(prompt)
         process = await self._spawn_process(command)
         self._register_process(trace_id, process)
@@ -257,6 +307,11 @@ class OpenCodeCliClient:
                 if event is None:
                     fallback_parts.append(text)
                     continue
+
+                if session_holder is not None and "id" not in session_holder:
+                    found = self._extract_session_id(event)
+                    if found:
+                        session_holder["id"] = found
 
                 error_message = self._extract_error_message(event)
                 if error_message:
@@ -292,14 +347,28 @@ class OpenCodeCliClient:
                 for chunk in self._split_chunks(fallback):
                     yield chunk
 
-    async def _run_once(self, prompt: str, trace_id: str, *, collect_only: bool) -> str:
+    async def _run_once(
+        self,
+        prompt: str,
+        trace_id: str,
+        *,
+        session_id: str | None = None,
+        session_holder: dict[str, str] | None = None,
+    ) -> str:
         parts: list[str] = []
-        async for piece in self._run_stream_once(prompt=prompt, trace_id=trace_id):
+        async for piece in self._run_stream_once(
+            prompt=prompt,
+            trace_id=trace_id,
+            session_id=session_id,
+            session_holder=session_holder,
+        ):
             parts.append(piece)
         return "".join(parts).strip()
 
-    def _build_command(self) -> list[str]:
+    def _build_command(self, session_id: str | None = None) -> list[str]:
         command = [self._bin, "run", "--format", "json"]
+        if session_id:
+            command.extend(["--session", session_id])
         if self._model:
             command.extend(["--model", self._model])
         if self._agent:
@@ -400,6 +469,85 @@ class OpenCodeCliClient:
                 if isinstance(message, str):
                     return message.strip()
         return ""
+
+    @staticmethod
+    def _extract_session_id(event: dict[str, Any]) -> str:
+        keys = ("sessionID", "session_id", "sessionId")
+        for key in keys:
+            value = event.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        part = event.get("part")
+        if isinstance(part, dict):
+            for key in keys:
+                value = part.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return ""
+
+    def _build_native_prompt(self, messages: list[dict[str, str]], *, include_preamble: bool) -> str:
+        user_text = ""
+        for message in reversed(messages):
+            if str(message.get("role", "user")) == "user":
+                user_text = str(message.get("content", "")).strip()
+                break
+        if not include_preamble:
+            return user_text
+
+        lines = ["你是 CodexClaw 的后端助手。仅输出回复正文，不要加额外前缀。"]
+        skill_summary = ClaudeCliClient._build_skill_summary()
+        if skill_summary:
+            lines.extend(
+                [
+                    "",
+                    "本机可用 skills 如下。若用户询问 skills，必须基于此列表回答，不要说当前环境没有加载 skill。",
+                    skill_summary,
+                ]
+            )
+        lines.extend(["", f"用户: {user_text}"])
+        return "\n".join(lines)
+
+    def _get_session_id(self, session_key: str | None) -> str | None:
+        if not session_key:
+            return None
+        with self._session_lock:
+            return self._session_ids.get(session_key)
+
+    def _persist_session(self, session_key: str | None, session_holder: dict[str, str]) -> None:
+        if not session_key:
+            return
+        new_id = session_holder.get("id")
+        if not new_id:
+            return
+        with self._session_lock:
+            if self._session_ids.get(session_key) == new_id:
+                return
+            self._session_ids[session_key] = new_id
+            self._save_sessions()
+
+    def _load_sessions(self) -> dict[str, str]:
+        try:
+            with open(self._session_store_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+        if isinstance(data, dict):
+            return {str(k): str(v) for k, v in data.items() if isinstance(v, str) and v}
+        return {}
+
+    def _save_sessions(self) -> None:
+        # Callers hold self._session_lock.
+        try:
+            os.makedirs(os.path.dirname(self._session_store_path), exist_ok=True)
+            tmp_path = f"{self._session_store_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                json.dump(self._session_ids, fh)
+            os.replace(tmp_path, self._session_store_path)
+        except OSError:
+            logger.warning(
+                "failed to persist opencode session state",
+                extra={"event": "opencode.session_persist", "backend": self._name},
+            )
 
     def _build_prompt(self, messages: list[dict[str, str]]) -> str:
         prompt_lines = [

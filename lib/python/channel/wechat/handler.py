@@ -117,11 +117,15 @@ class WeChatWebhookHandler:
         try:
             if self._settings.streaming_enabled:
                 parts: list[str] = []
-                async for piece in self._codex_client.chat_stream(messages=messages, trace_id=trace_id):
+                async for piece in self._codex_client.chat_stream(
+                    messages=messages, trace_id=trace_id, session_key=session_key
+                ):
                     parts.append(piece)
                 answer = "".join(parts).strip()
             else:
-                answer = await self._codex_client.chat(messages=messages, trace_id=trace_id)
+                answer = await self._codex_client.chat(
+                    messages=messages, trace_id=trace_id, session_key=session_key
+                )
 
             if not answer.strip():
                 answer = "(空响应)"

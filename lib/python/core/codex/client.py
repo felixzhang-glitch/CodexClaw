@@ -43,7 +43,13 @@ class CodexClient:
         # CLI mode does not keep a persistent network client.
         return None
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+    def reset_backend_session(self, session_key: str) -> None:
+        # Codex CLI is invoked statelessly; no native session to reset.
+        return None
+
+    async def chat(
+        self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None
+    ) -> str:
         self._assert_circuit_closed()
 
         prompt = self._build_prompt(messages)
@@ -98,7 +104,9 @@ class CodexClient:
         finally:
             self._clear_cancel_request(trace_id)
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str) -> AsyncIterator[str]:
+    async def chat_stream(
+        self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None
+    ) -> AsyncIterator[str]:
         self._assert_circuit_closed()
 
         prompt = self._build_prompt(messages)

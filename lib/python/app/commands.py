@@ -77,10 +77,12 @@ def process_command(
 
     if text == "/new":
         session_id = session_manager.new_session(session_key)
+        _reset_backend_session(router, session_key)
         return CommandResult(handled=True, reply_text=f"已创建新会话: {session_id[:8]}")
 
     if text == "/reset":
         session_manager.reset_session(session_key)
+        _reset_backend_session(router, session_key)
         return CommandResult(handled=True, reply_text="已清空当前会话上下文。")
 
     if text in {"/compact", "/compress"}:
@@ -104,10 +106,19 @@ def process_command(
                 return CommandResult(handled=True, reply_text=f"当前已是 {target}（{router.label(target)}）后端。")
             if router.switch(target):
                 session_manager.reset_session(session_key)
+                _reset_backend_session(router, session_key)
                 return CommandResult(handled=True, reply_text=f"已切换后端为 {target}（{router.label(target)}）。")
             return CommandResult(handled=True, reply_text=f"切换失败: 未知后端 {target}。")
 
     return None
+
+
+def _reset_backend_session(router: Any | None, session_key: str) -> None:
+    if router is None:
+        return
+    reset = getattr(router, "reset_backend_session", None)
+    if callable(reset):
+        reset(session_key)
 
 
 def parse_reminder_command(raw_text: str) -> ReminderCommand | None:

@@ -193,14 +193,6 @@ class FeishuWebhookHandler:
                 request_uuid=f"{event.message_id}-busy",
             )
             return
-        notice_task = asyncio.create_task(
-            self._notify_if_still_running(
-                session_key=session_key,
-                message_id=event.message_id,
-                chat_id=event.chat_id,
-                trace_id=trace_id,
-            )
-        )
         generated_since = time.time()
         delivered_image_paths: list[str] = []
         auto_complete_on_image = self._looks_like_image_request(event.text)
@@ -227,9 +219,12 @@ class FeishuWebhookHandler:
                     generated_since=generated_since,
                     already_sent_image_paths=delivered_image_paths,
                     include_recent_generated_images=auto_complete_on_image,
+                    session_key=session_key,
                 )
             else:
-                answer = await self._codex_client.chat(messages=messages, trace_id=trace_id)
+                answer = await self._codex_client.chat(
+                    messages=messages, trace_id=trace_id, session_key=session_key
+                )
                 generated_images = []
                 if auto_complete_on_image:
                     generated_images = self._filter_unsent_images(
@@ -275,8 +270,6 @@ class FeishuWebhookHandler:
                 trace_id=trace_id,
             )
         finally:
-            notice_task.cancel()
-            await asyncio.gather(notice_task, return_exceptions=True)
             if image_watch_task is not None:
                 await self._finish_image_watch_task(image_watch_task, delivered_image_paths)
             self._task_registry.finish(key=session_key, trace_id=trace_id)
@@ -291,11 +284,14 @@ class FeishuWebhookHandler:
         generated_since: float,
         already_sent_image_paths: list[str] | None = None,
         include_recent_generated_images: bool = False,
+        session_key: str | None = None,
     ) -> str:
         start = time.monotonic()
         full_text_parts: list[str] = []
 
-        async for piece in self._codex_client.chat_stream(messages=messages, trace_id=trace_id):
+        async for piece in self._codex_client.chat_stream(
+            messages=messages, trace_id=trace_id, session_key=session_key
+        ):
             full_text_parts.append(piece)
 
         answer = "".join(full_text_parts).strip()
@@ -333,22 +329,6 @@ class FeishuWebhookHandler:
             },
         )
         return answer
-
-    async def _notify_if_still_running(self, session_key: str, message_id: str, chat_id: str, trace_id: str) -> None:
-        await asyncio.sleep(self._settings.task_running_notice_seconds)
-        active_task = self._task_registry.get(session_key)
-        if active_task is None or active_task.trace_id != trace_id:
-            return
-        if not self._task_registry.mark_notice_sent(session_key, trace_id):
-            return
-
-        await self._safe_reply(
-            message_id=message_id,
-            chat_id=chat_id,
-            text="任务仍在运行中，我会继续处理；如需强制终止请发送 /stop。",
-            trace_id=trace_id,
-            request_uuid=f"{message_id}-running",
-        )
 
     async def _handle_stop_command(self, message_id: str, chat_id: str, session_key: str, trace_id: str) -> None:
         task = self._task_registry.cancel(session_key)

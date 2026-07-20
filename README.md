@@ -22,9 +22,9 @@ CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 - 切换隔离：清空当前会话上下文 + claude/qodercli/opencode 使用独立工作目录
 
 **会话与任务**
-- 会话记忆（`user_id + chat_id` 维度，默认 10 轮 FIFO 裁剪）
+- 会话记忆（`user_id + chat_id` 维度）：opencode 后端走原生会话续接（`--session` 持久化），上下文与超限压缩交给 opencode 自行管理；codex/claude/qodercli 仍按 `MAX_HISTORY_ROUNDS` 轮数拼接历史（默认 50）
 - 消息去重（`message_id`，TTL 1 小时）
-- 长任务通知（超阈值提示"仍在运行"）+ `/stop` 强制终止
+- 长任务：仅以 Typing 回执表示处理中，最终答案单条稳定输出 + `/stop` 强制终止
 - 定时提醒 `/remind 10m 内容`，支持 `s/m/h/d`
 
 **回复体验**
@@ -183,6 +183,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 | `OPENCODE_AGENT` | | 可空，`opencode run --agent` |
 | `OPENCODE_TIMEOUT_SECONDS` | `300` | 兼容字段（不再作为总超时使用） |
 | `OPENCODE_IDLE_TIMEOUT_SECONDS` | `120` | 单行 stdout idle 超时 |
+| `OPENCODE_SESSION_STORE_PATH` | `./runtime/server/opencode-sessions.json` | opencode 原生会话 id 持久化（按会话维度） |
 | `CLAUDE_CLI_BIN` | `claude` | claude 二进制 |
 | `CLAUDE_MODEL` | | 可空 |
 | `CLAUDE_PERMISSION_MODE` | `auto` | root 下 `auto` 为最大权限 |
@@ -196,9 +197,8 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `MAX_HISTORY_ROUNDS` | `10` | 会话记忆轮数 |
+| `MAX_HISTORY_ROUNDS` | `50` | 会话记忆轮数（仅作用于 codex/claude/qodercli 的历史拼接；opencode 走原生会话不受此限） |
 | `STREAMING_ENABLED` | `true` | 是否流式获取 |
-| `TASK_RUNNING_NOTICE_SECONDS` | `30` | 长任务通知阈值 |
 | `FEISHU_MESSAGE_CHUNK_CHARS` | `1500` | 飞书文本分段长度 |
 | `WECHAT_WEBHOOK_TOKEN` | | 微信 webhook 共享 token |
 | `WECHAT_MESSAGE_CHUNK_CHARS` | `1800` | 微信文本分段长度 |
@@ -245,7 +245,7 @@ source .venv/bin/activate
 pytest -c conf/pytest.ini -q
 ```
 
-覆盖：消息解析、签名校验、会话裁剪、`/new` 行为、Codex streaming mock、quick ack + 单条回复、长任务通知、`/stop` 取消。
+覆盖：消息解析、签名校验、会话裁剪、`/new` 行为、Codex streaming mock、quick ack + 单条回复、`/stop` 取消。
 
 ## 日志与排障
 

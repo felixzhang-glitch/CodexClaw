@@ -15,12 +15,12 @@ class FakeCodexClient:
         self.messages: list[dict[str, str]] = []
         self.cancelled = False
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         self.messages = messages
         yield "微信"
         yield "回复"
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+    async def chat(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None) -> str:
         self.messages = messages
         return "微信回复"
 
@@ -37,7 +37,7 @@ class BlockingCodexClient(FakeCodexClient):
         self.started = asyncio.Event()
         self.cancel_event = asyncio.Event()
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         self.started.set()
         await self.cancel_event.wait()
         raise CodexClientCancelled("cancelled")

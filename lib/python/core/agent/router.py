@@ -95,11 +95,21 @@ class AgentRouter:
         with self._lock:
             return self._clients[self._active]
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
-        return await self._active_client().chat(messages=messages, trace_id=trace_id)
+    async def chat(
+        self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None
+    ) -> str:
+        return await self._active_client().chat(messages=messages, trace_id=trace_id, session_key=session_key)
 
-    def chat_stream(self, messages: list[dict[str, str]], trace_id: str) -> AsyncIterator[str]:
-        return self._active_client().chat_stream(messages=messages, trace_id=trace_id)
+    def chat_stream(
+        self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None
+    ) -> AsyncIterator[str]:
+        return self._active_client().chat_stream(messages=messages, trace_id=trace_id, session_key=session_key)
+
+    def reset_backend_session(self, session_key: str) -> None:
+        for client in self._clients.values():
+            reset = getattr(client, "reset_backend_session", None)
+            if callable(reset):
+                reset(session_key)
 
     def cancel(self, trace_id: str) -> bool:
         cancelled = False

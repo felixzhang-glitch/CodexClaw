@@ -63,10 +63,13 @@ class Settings(BaseSettings):
     opencode_agent: str = Field(default="", validation_alias="OPENCODE_AGENT")
     opencode_timeout_seconds: float = Field(default=300.0, validation_alias="OPENCODE_TIMEOUT_SECONDS")
     opencode_idle_timeout_seconds: float = Field(default=120.0, validation_alias="OPENCODE_IDLE_TIMEOUT_SECONDS")
+    opencode_session_store_path: str = Field(
+        default="./runtime/server/opencode-sessions.json",
+        validation_alias="OPENCODE_SESSION_STORE_PATH",
+    )
 
-    max_history_rounds: int = Field(default=10, validation_alias="MAX_HISTORY_ROUNDS")
+    max_history_rounds: int = Field(default=50, validation_alias="MAX_HISTORY_ROUNDS")
     streaming_enabled: bool = Field(default=True, validation_alias="STREAMING_ENABLED")
-    task_running_notice_seconds: float = Field(default=30.0, validation_alias="TASK_RUNNING_NOTICE_SECONDS")
     feishu_message_chunk_chars: int = Field(default=1500, validation_alias="FEISHU_MESSAGE_CHUNK_CHARS")
     wechat_webhook_token: str = Field(default="", validation_alias="WECHAT_WEBHOOK_TOKEN")
     wechat_message_chunk_chars: int = Field(default=1800, validation_alias="WECHAT_MESSAGE_CHUNK_CHARS")

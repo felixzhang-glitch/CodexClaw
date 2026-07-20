@@ -113,10 +113,10 @@ class FakeCodexClient:
     def __init__(self) -> None:
         self.cancelled = False
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+    async def chat(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None) -> str:
         return "你好"
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         for piece in ["你", "好"]:
             yield piece
 
@@ -130,7 +130,7 @@ class RecordingCodexClient(FakeCodexClient):
         super().__init__()
         self.messages: list[dict[str, str]] = []
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         self.messages = messages
         yield "收到图片"
 
@@ -140,7 +140,7 @@ class ImageCodexClient(FakeCodexClient):
         super().__init__()
         self._image_path = image_path
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         yield f"Generated Image:\nSaved to: file://{self._image_path}"
 
 
@@ -149,7 +149,7 @@ class EmptyImageCodexClient(FakeCodexClient):
         super().__init__()
         self._image_path = image_path
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         self._image_path.write_bytes(b"fake image")
         if False:
             yield ""
@@ -161,7 +161,7 @@ class BlockingImageCodexClient(FakeCodexClient):
         self._image_path = image_path
         self.cancelled_event = asyncio.Event()
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         self._image_path.write_bytes(b"fake image")
         while not self.cancelled_event.is_set():
             await asyncio.sleep(0.05)
@@ -181,7 +181,7 @@ class WatchRaceImageCodexClient(FakeCodexClient):
         self._image_path = image_path
         self._image_upload_started_event = image_upload_started_event
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         self._image_path.write_bytes(b"fake image")
         await asyncio.wait_for(self._image_upload_started_event.wait(), timeout=2.0)
         if False:
@@ -192,7 +192,6 @@ class WatchRaceImageCodexClient(FakeCodexClient):
 async def test_handle_text_event_quick_ack_and_single_final_reply() -> None:
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
     )
@@ -224,7 +223,6 @@ async def test_handle_text_event_quick_ack_and_single_final_reply() -> None:
 async def test_handle_image_event_downloads_image_and_passes_local_path_to_codex(tmp_path) -> None:
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
         feishu_received_images_dir=str(tmp_path / "received"),
@@ -262,7 +260,6 @@ async def test_handle_image_event_downloads_image_and_passes_local_path_to_codex
 async def test_handle_post_event_downloads_all_images_and_keeps_text(tmp_path) -> None:
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
         feishu_received_images_dir=str(tmp_path / "received"),
@@ -303,10 +300,10 @@ class BlockingCodexClient:
         self.cancelled = asyncio.Event()
         self.finished = asyncio.Event()
 
-    async def chat(self, messages: list[dict[str, str]], trace_id: str) -> str:
+    async def chat(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None) -> str:
         return "unused"
 
-    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str):
+    async def chat_stream(self, messages: list[dict[str, str]], trace_id: str, *, session_key: str | None = None):
         while not self.cancelled.is_set() and not self.finished.is_set():
             await asyncio.sleep(0.01)
         if self.cancelled.is_set():
@@ -319,47 +316,9 @@ class BlockingCodexClient:
 
 
 @pytest.mark.asyncio
-async def test_handle_text_event_sends_running_notice_before_final_reply() -> None:
-    settings = SimpleNamespace(
-        streaming_enabled=True,
-        task_running_notice_seconds=0.01,
-        feishu_encrypt_key="",
-        feishu_verification_token="",
-    )
-    feishu_client = FakeFeishuClient()
-    codex_client = BlockingCodexClient()
-    handler = FeishuWebhookHandler(
-        settings=settings,
-        feishu_client=feishu_client,
-        codex_client=codex_client,
-        session_manager=SessionManager(max_history_rounds=10),
-        deduplicator=MessageDeduplicator(ttl_seconds=3600),
-        task_registry=ActiveTaskRegistry(),
-    )
-
-    event = SimpleNamespace(
-        message_id="om_test_running",
-        user_id="ou_test_1",
-        chat_id="oc_test_1",
-        text="复杂任务",
-    )
-
-    task = asyncio.create_task(handler._handle_text_event(event=event, trace_id="trace-running"))
-    await asyncio.sleep(0.05)
-
-    assert any("任务仍在运行中" in text for text, _ in feishu_client.reply_calls)
-
-    codex_client.finished.set()
-    await task
-
-    assert feishu_client.reply_calls[-1][0] == "完成"
-
-
-@pytest.mark.asyncio
 async def test_stop_command_cancels_active_task() -> None:
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
     )
@@ -401,7 +360,6 @@ async def test_stop_command_cancels_active_task() -> None:
 async def test_reply_fallback_sends_to_chat_when_reply_fails() -> None:
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
     )
@@ -433,7 +391,6 @@ async def test_reply_fallback_sends_to_chat_when_reply_fails() -> None:
 async def test_reminder_command_schedules_chat_message() -> None:
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
     )
@@ -474,7 +431,6 @@ async def test_generated_image_path_is_uploaded_and_replied(tmp_path) -> None:
     image_path.write_bytes(b"fake image")
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
         codex_generated_images_dir=str(tmp_path / "empty_generated_images"),
@@ -510,7 +466,6 @@ async def test_recent_generated_image_is_used_when_codex_output_is_empty(tmp_pat
     image_path = image_dir / "generated.png"
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
         codex_generated_images_dir=str(image_root),
@@ -550,7 +505,6 @@ async def test_non_image_request_does_not_pick_up_recent_generated_image(tmp_pat
     image_path = image_dir / "generated.png"
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
         codex_generated_images_dir=str(image_root),
@@ -587,7 +541,6 @@ async def test_generated_image_watcher_auto_completes_image_request(tmp_path) ->
     image_path = image_dir / "generated.png"
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
         codex_generated_images_dir=str(image_root),
@@ -627,7 +580,6 @@ async def test_generated_image_watcher_reserves_path_before_final_scan(tmp_path)
     image_path = image_dir / "generated.png"
     settings = SimpleNamespace(
         streaming_enabled=True,
-        task_running_notice_seconds=30.0,
         feishu_encrypt_key="",
         feishu_verification_token="",
         codex_generated_images_dir=str(image_root),
