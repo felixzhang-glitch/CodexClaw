@@ -17,6 +17,10 @@ from core.codex.client import CodexClientCancelled, CodexClientError
 
 logger = logging.getLogger(__name__)
 
+_PROJECT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+)
+
 
 class OpenCodeCliClient:
     """Backend client for the `opencode` TUI/CLI (`opencode run --format json`).
@@ -377,9 +381,21 @@ class OpenCodeCliClient:
         return command
 
     async def _spawn_process(self, command: list[str]) -> asyncio.subprocess.Process:
+        env = os.environ.copy()
+        # rules must come only from rules/system.md; keep ~/.claude/skills available
+        env["OPENCODE_DISABLE_CLAUDE_CODE_PROMPT"] = "1"
+        hook_plugin = os.path.join(_PROJECT_ROOT, "hooks", "inject-time.js")
+        if os.path.isfile(hook_plugin):
+            env["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+                {
+                    "$schema": "https://opencode.ai/config.json",
+                    "plugin": [f"file://{hook_plugin}"],
+                }
+            )
         return await asyncio.create_subprocess_exec(
             *command,
             cwd=self._work_dir,
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=self._settings.codex_stream_read_limit_bytes,

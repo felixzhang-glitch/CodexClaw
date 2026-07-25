@@ -114,6 +114,11 @@ ensure_prerequisites() {
     set_env_in_file "CODEX_WORK_DIR" "./runtime/codex-workdir"
   fi
   mkdir -p "$(get_effective_value CODEX_WORK_DIR)"
+  # git boundary: stop backend CLIs (opencode/codex/claude) from walking up
+  # and injecting the project's AGENTS.md into chat context
+  if [[ ! -e "$(get_effective_value CODEX_WORK_DIR)/.git" ]]; then
+    git -C "$(get_effective_value CODEX_WORK_DIR)" init -q 2>/dev/null || true
+  fi
 }
 
 pid_is_running() {

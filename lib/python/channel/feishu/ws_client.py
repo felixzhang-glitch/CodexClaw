@@ -40,6 +40,9 @@ class FeishuWsClient:
         event_handler = (
             lark.EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(self._on_message_receive)
+            .register_p2_im_message_message_read_v1(self._on_ignored_event)
+            .register_p2_im_message_reaction_created_v1(self._on_ignored_event)
+            .register_p2_im_message_reaction_deleted_v1(self._on_ignored_event)
             .build()
         )
         self._client = lark.ws.Client(
@@ -60,6 +63,10 @@ class FeishuWsClient:
             self._client.start()
         except Exception:
             logger.exception("feishu ws client crashed")
+
+    @staticmethod
+    def _on_ignored_event(_data: Any) -> None:
+        """No-op handler for subscribed events that need no processing."""
 
     def _on_message_receive(self, data: P2ImMessageReceiveV1) -> None:
         """Synchronous callback invoked by lark SDK in its own thread."""

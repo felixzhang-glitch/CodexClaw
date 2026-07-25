@@ -1,7 +1,8 @@
 """Project-level rules loader.
 
-Reads rules/system.md once at first access and caches the content for the
-lifetime of the process.
+Re-reads rule files on every call so edits take effect without restart.
+rules/system.md is public; rules/admin.md holds private user info and is
+gitignored.
 """
 
 from __future__ import annotations
@@ -9,17 +10,19 @@ from __future__ import annotations
 import os
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-_RULES_PATH = os.path.join(_ROOT, "rules", "system.md")
-_rules_content: str | None = None
+_RULES_DIR = os.path.join(_ROOT, "rules")
+_RULE_FILES = ("system.md", "admin.md")
 
 
 def load_system_rules() -> str:
-    """Return the content of rules/system.md, cached after first read."""
-    global _rules_content
-    if _rules_content is None:
+    """Return the merged content of rules/system.md and rules/admin.md."""
+    parts: list[str] = []
+    for filename in _RULE_FILES:
         try:
-            with open(_RULES_PATH, encoding="utf-8") as f:
-                _rules_content = f.read().strip()
-        except FileNotFoundError:
-            _rules_content = ""
-    return _rules_content
+            with open(os.path.join(_RULES_DIR, filename), encoding="utf-8") as f:
+                content = f.read().strip()
+        except OSError:
+            continue
+        if content:
+            parts.append(content)
+    return "\n\n".join(parts)

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lark CLI"
+  short_description: "Use local lark-cli to operate Feishu/Lark services."
+  default_prompt: "Use lark-cli to help me query or operate Feishu/Lark."

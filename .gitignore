@@ -10,3 +10,4 @@ __pycache__/
 logs/
 runtime/
 .qoder/
+rules/admin.md

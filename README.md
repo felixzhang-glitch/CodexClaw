@@ -10,10 +10,16 @@ codeClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 ### 功能特性
 
 **渠道接入**
-- 飞书 Webhook 回调（URL challenge 校验 + 签名校验）
+- 飞书长连接（WebSocket，无需公网回调地址；旧 Webhook 端点保留但已弃用）
 - 微信私聊（轻量 sidecar 长轮询 iLink Bot API）
 - 私聊文本 + 图片消息（自动下载图片并交给 CLI）
 - 群聊 @ 机器人触发（默认要求 @）
+
+**项目级定制（rules / skills / hooks）**
+- `rules/system.md`（公共规则）+ `rules/admin.md`（私人信息，已 gitignore 脱敏），每条消息动态加载，改完即生效无需重启
+- `skills/` 项目级技能目录，每条消息实时扫描注入可用列表
+- `hooks/inject-time.js` 时间感知：opencode 插件在每条用户消息注入当前系统时间
+- 提示词隔离：opencode 只读 rules，不读项目 `AGENTS.md`（工作目录 git 边界）与 `~/.claude/CLAUDE.md`（禁用 Claude 兼容提示词）
 
 **多后端路由**
 - `opencode` / `codex` / `claude` / `qodercli` 四后端，运行时通过 `/opencode` `/codex` `/claude` `/qodercli` 切换
@@ -79,12 +85,12 @@ codeClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 
 应用凭证获取参考 [Feishu 渠道配置](https://docs.openclaw.ai/zh-CN/channels/feishu#3-%E8%8E%B7%E5%8F%96%E5%BA%94%E7%94%A8%E5%87%AD%E8%AF%81)。在飞书开放平台：
 
-1. 事件订阅地址填：`https://<你的公网域名>/webhook/feishu`
-2. 订阅事件：`im.message.receive_v1`
+1. 事件订阅方式选择 **使用长连接接收事件**（无需公网回调地址）
+2. 订阅事件：`im.message.receive_v1`（已读/表情事件可选订阅，服务端会静默忽略）
 3. 开通机器人消息权限（读取、回复、主动发送 IM 文本和图片、上传图片、获取消息资源）
 4. 在应用可用范围内允许私聊机器人
 
-> 若启用验证 Token，写到 `FEISHU_VERIFICATION_TOKEN`；若启用加密 Key，写到 `FEISHU_ENCRYPT_KEY`（自动启用签名校验）。
+> 旧 Webhook 回调端点 `POST /webhook/feishu` 保留但已弃用。若仍使用回调模式：验证 Token 写到 `FEISHU_VERIFICATION_TOKEN`，加密 Key 写到 `FEISHU_ENCRYPT_KEY`（自动启用签名校验）。
 
 ### 微信（可选）
 
@@ -135,6 +141,40 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 | `/remind 10m 喝水` | 定时提醒，时间单位支持 `s/m/h/d`（`/timer` 同义） |
 
 > 后端切换成功后会清空当前会话历史，避免旧后端的工具、skills 或回答风格污染新后端。
+
+## 项目级定制
+
+### rules（提示词规则）
+
+| 文件 | 用途 | 提交 GitHub |
+|------|------|------------|
+| `rules/system.md` | 公共规则：角色、工具偏好、回复风格 | 是 |
+| `rules/admin.md` | 私人信息：管理员身份、个人偏好 | 否（已 gitignore） |
+| `rules/admin.md.example` | admin.md 脱敏范例，复制后填写 | 是 |
+
+两个文件在每条消息处理时合并加载（`system.md` + `admin.md`），**修改后立即生效，无需重启**。opencode 后端的规则只在新建会话时注入，老会话需 `/reset` 后生效。
+
+```bash
+cp rules/admin.md.example rules/admin.md   # 首次使用
+```
+
+### skills（项目级技能）
+
+`skills/` 目录下每个子目录放一个 `SKILL.md`（含 `name`/`description` frontmatter），与 `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills` 一并在每条消息实时扫描，注入可用技能列表。`/skills` 命令可查看当前识别结果。
+
+### hooks（时间感知）
+
+`hooks/inject-time.js` 是一个 opencode 插件，挂 `chat.message` 钩子，在每条用户消息末尾追加 `当前系统时间: YYYY-MM-DD HH:MM:SS 星期X`，让机器人具备时间感知能力（"明天"、"刚才"等表述可正确理解）。
+
+- 注册方式：`opencode_cli.py` 启动子进程时通过 `OPENCODE_CONFIG_CONTENT` 环境变量注入插件路径，只作用于 codeClaw 的 opencode 会话，不污染本机全局 opencode 配置
+- 禁用方式：删除 `hooks/inject-time.js` 即可（fail-open，文件不存在自动跳过）
+
+### 提示词隔离
+
+opencode 的提示词来源被严格限制为 `rules/`：
+
+- 工作目录（`runtime/codex-workdir`）自动初始化为独立 git 仓库，阻断 opencode/codex 向上遍历读取本项目开发用的 `AGENTS.md`
+- 子进程注入 `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1`，禁用 opencode 对 `~/.claude/CLAUDE.md` 的兼容加载（`~/.claude/skills` 仍保留可用）
 
 ## 配置项
 
@@ -233,7 +273,13 @@ lib/python/
   core/session/       # manager / deduplicator / task_registry / reminder_scheduler
 lib/js/
   wechat-sidecar.mjs  # 微信 sidecar
-md/
+rules/
+  system.md           # 公共提示词规则
+  admin.md.example    # 私人信息脱敏范例（admin.md 已 gitignore）
+skills/               # 项目级技能（每目录一个 SKILL.md）
+hooks/
+  inject-time.js      # opencode 时间注入插件
+docs/                 # 架构与设计文档
 tests/
 ```
 
