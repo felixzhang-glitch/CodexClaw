@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, Request
@@ -9,6 +10,7 @@ from app.config import get_settings
 from app.logging import setup_logging
 from channel.feishu.client import FeishuClient, FeishuClientError
 from channel.feishu.handler import FeishuWebhookHandler
+from channel.feishu.ws_client import FeishuWsClient
 from channel.wechat.handler import WeChatWebhookHandler
 from core.agent.router import AgentRouter
 from core.session.deduplicator import MessageDeduplicator
@@ -20,7 +22,7 @@ settings = get_settings()
 setup_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="CodexClaw", version="0.1.0")
+app = FastAPI(title="codeClaw", version="0.1.0")
 
 session_manager = SessionManager(max_history_rounds=settings.max_history_rounds)
 deduplicator = MessageDeduplicator(ttl_seconds=settings.deduplicate_ttl_seconds)
@@ -73,8 +75,9 @@ async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/webhook/feishu")
+@app.post("/webhook/feishu", deprecated=True)
 async def feishu_webhook(request: Request) -> JSONResponse:
+    """Legacy webhook endpoint. Use long-connection mode instead."""
     raw_body = await request.body()
     try:
         result = await feishu_handler.handle_webhook(headers=request.headers, raw_body=raw_body)
@@ -108,6 +111,16 @@ async def wechat_webhook(request: Request) -> JSONResponse:
 @app.on_event("startup")
 async def startup_event() -> None:
     await reminder_scheduler.start()
+    loop = asyncio.get_running_loop()
+    feishu_ws = FeishuWsClient(
+        app_id=settings.feishu_app_id,
+        app_secret=settings.feishu_app_secret,
+        handler=feishu_handler,
+        loop=loop,
+        bot_open_id=settings.feishu_bot_open_id,
+        group_require_mention=settings.feishu_group_require_mention,
+    )
+    feishu_ws.start_in_thread()
 
 
 @app.on_event("shutdown")

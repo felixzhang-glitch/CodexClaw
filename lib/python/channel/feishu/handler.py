@@ -23,6 +23,7 @@ from channel.feishu.media import (
     remove_local_image_references,
 )
 from channel.feishu.models import (
+    FeishuTextMessageEvent,
     extract_token,
     is_url_verification,
     parse_message_event,
@@ -62,6 +63,12 @@ class FeishuWebhookHandler:
         self._task_registry = task_registry
         self._reminder_scheduler = reminder_scheduler
         self._downloaded_image_paths: list[str] = []
+
+    async def handle_event(self, event: FeishuTextMessageEvent) -> None:
+        """Entry point for SDK long-connection mode (no verification needed)."""
+        trace_id = uuid.uuid4().hex
+        task = asyncio.create_task(self._handle_text_event(event=event, trace_id=trace_id))
+        task.add_done_callback(lambda done: self._log_background_task_result(done, trace_id))
 
     async def handle_webhook(self, headers: Mapping[str, str], raw_body: bytes) -> dict[str, Any]:
         trace_id = uuid.uuid4().hex

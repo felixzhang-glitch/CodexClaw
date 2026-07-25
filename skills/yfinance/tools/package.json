@@ -1,0 +1,10 @@
+{
+  "name": "yfinance-cli",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Yahoo Finance CLI powered by yahoo-finance2",
+  "dependencies": {
+    "yahoo-finance2": "^4.0.0"
+  }
+}
