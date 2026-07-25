@@ -48,7 +48,7 @@ def test_native_prompt_only_uses_latest_user_message(tmp_path) -> None:
 
     prompt_new = client._build_native_prompt(messages, include_preamble=True)
     assert "最新问题" in prompt_new
-    assert "CodexClaw" in prompt_new
+    assert "codeClaw" in prompt_new
 
 
 def test_extract_session_id_from_event_and_part(tmp_path) -> None:

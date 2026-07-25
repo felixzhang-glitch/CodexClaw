@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.config import Settings
+from app.rules import load_system_rules
 from core.codex.client import CodexClientCancelled, CodexClientError
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class ClaudeCliClient:
         "~/.claude/skills",
         "~/.codex/skills",
         "~/.agents/skills",
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "skills"),  # 项目级
     )
 
     def __init__(
@@ -508,11 +510,15 @@ class ClaudeCliClient:
         return ""
 
     def _build_prompt(self, messages: list[dict[str, str]]) -> str:
-        prompt_lines = [
-            "你是 CodexClaw 的后端助手。",
-            "请基于以下多轮对话，直接回复最后一条用户消息。",
-            "仅输出回复正文，不要加额外前缀。",
-        ]
+        rules = load_system_rules()
+        if rules:
+            prompt_lines = [rules, "", "请基于以下多轮对话，直接回复最后一条用户消息。"]
+        else:
+            prompt_lines = [
+                "你是 codeClaw 的后端助手。",
+                "请基于以下多轮对话，直接回复最后一条用户消息。",
+                "仅输出回复正文，不要加额外前缀。",
+            ]
         skill_summary = self._build_skill_summary()
         if skill_summary:
             prompt_lines.extend(

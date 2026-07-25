@@ -9,5 +9,4 @@ __pycache__/
 *.pid
 logs/
 runtime/
-AGENTS.md
 .qoder/

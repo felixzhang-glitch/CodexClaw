@@ -1,12 +1,11 @@
-# CodexClaw
+# codeClaw
 
-飞书/微信 私聊机器人 → 本机 OpenCode / Codex / Claude / Qoder CLI，运行时可切换后端。
+飞书/微信 聊天机器人 → 本机 OpenCode / Codex / Claude / Qoder CLI，运行时可切换后端。
 
-<img width="818" height="1456" alt="image" src="https://github.com/user-attachments/assets/4d78591b-1c42-44e9-a772-0c5c38921b5d" />
 
 ## 概述
 
-CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私聊消息，调用本机已安装的 AI CLI 后端（`opencode`、`codex`、`claude`、`qodercli`）处理后回传。核心设计是 **运行时多后端路由**——通过聊天命令即可切换后端，切换状态持久化，重启保留。默认后端为 `opencode`。
+codeClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私聊消息，调用本机已安装的 AI CLI 后端（`opencode`、`codex`、`claude`、`qodercli`）处理后回传。核心设计是 **运行时多后端路由**——通过聊天命令即可切换后端，切换状态持久化，重启保留。默认后端为 `opencode`。
 
 ### 功能特性
 
@@ -89,7 +88,7 @@ CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 
 ### 微信（可选）
 
-微信接入使用轻量 sidecar，负责扫码登录、长轮询和发送消息，CodexClaw 只暴露本地 webhook 处理文本对话。
+微信接入使用轻量 sidecar，负责扫码登录、长轮询和发送消息，codeClaw 只暴露本地 webhook 处理文本对话。
 
 1. 在 `conf/.env` 中配置共享 token：
 
@@ -97,7 +96,7 @@ CodexClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 ```
 
-2. 启动 CodexClaw：`./bin/start`
+2. 启动 codeClaw：`./bin/start`
 3. 扫码登录微信 ClawBot：
 
 ```bash

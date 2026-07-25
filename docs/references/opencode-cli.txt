@@ -1,0 +1,37 @@
+# opencode CLI 参考
+
+## 基本用法
+
+```bash
+# 单次对话
+opencode run <prompt>
+
+# 带会话续接
+opencode run --session <session_id> <prompt>
+
+# 指定模型
+opencode run --model <provider/model> <prompt>
+
+# 指定 agent
+opencode run --agent <agent_name> <prompt>
+```
+
+## codeClaw 集成方式
+
+```bash
+opencode run --session <session_id> [--model <model>] [--agent <agent>] <prompt>
+```
+
+- `--session`：会话 ID，codeClaw 按 `user_id:chat_id` 维度映射
+- 输出读取：逐行 stdout，idle 超时由 `OPENCODE_IDLE_TIMEOUT_SECONDS` 控制
+- 会话管理：opencode 自行管理上下文窗口和压缩，codeClaw 不介入
+
+## 配置项
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `OPENCODE_CLI_BIN` | `opencode` | 二进制路径 |
+| `OPENCODE_MODEL` | （空） | 形如 `provider/model` |
+| `OPENCODE_AGENT` | （空） | `--agent` 参数 |
+| `OPENCODE_IDLE_TIMEOUT_SECONDS` | `120` | 单行 stdout idle 超时 |
+| `OPENCODE_SESSION_STORE_PATH` | `./runtime/server/opencode-sessions.json` | session ID 持久化 |
