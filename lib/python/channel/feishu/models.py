@@ -16,6 +16,8 @@ class FeishuTextMessageEvent:
     message_type: str = "text"
     image_key: str = ""
     image_keys: tuple[str, ...] = ()
+    file_key: str = ""
+    file_name: str = ""
 
 
 def is_url_verification(payload: dict[str, Any]) -> bool:
@@ -66,7 +68,7 @@ def parse_message_event(
         return None
 
     message_type = str(message.get("message_type", "")).strip()
-    if message_type not in {"text", "image", "post"}:
+    if message_type not in {"text", "image", "post", "file", "audio", "media"}:
         return None
 
     chat_type = str(message.get("chat_type", "")).strip()
@@ -85,6 +87,8 @@ def parse_message_event(
     text = ""
     image_key = ""
     image_keys: tuple[str, ...] = ()
+    file_key = ""
+    file_name = ""
     if message_type == "text":
         text = str(content.get("text", "")).strip()
         if not text:
@@ -95,6 +99,12 @@ def parse_message_event(
             return None
         image_keys = (image_key,)
         text = "用户发送了一张图片。"
+    elif message_type in {"file", "audio", "media"}:
+        file_key = str(content.get("file_key", "")).strip()
+        if not file_key:
+            return None
+        file_name = str(content.get("file_name", "")).strip()
+        text = "用户发送了一个文件。"
     else:
         text = _extract_post_text(content)
         image_keys = tuple(_extract_post_image_keys(content))
@@ -136,6 +146,8 @@ def parse_message_event(
         message_type=message_type,
         image_key=image_key,
         image_keys=image_keys,
+        file_key=file_key,
+        file_name=file_name,
     )
 
 

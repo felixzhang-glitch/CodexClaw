@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -46,9 +47,29 @@ def test_native_prompt_only_uses_latest_user_message(tmp_path) -> None:
     assert prompt_continue == "最新问题"
     assert "旧问题" not in prompt_continue
 
-    prompt_new = client._build_native_prompt(messages, include_preamble=True)
-    assert "最新问题" in prompt_new
-    assert "codeClaw" in prompt_new
+    # Rules now reach opencode via {work_dir}/AGENTS.md, so the preamble only
+    # carries the skill summary; without one the prompt is the bare user text.
+    with patch("core.agent.opencode_cli.ClaudeCliClient._build_skill_summary", return_value=""):
+        prompt_new = client._build_native_prompt(messages, include_preamble=True)
+    assert prompt_new == "最新问题"
+
+    with patch("core.agent.opencode_cli.ClaudeCliClient._build_skill_summary", return_value="- demo-skill"):
+        prompt_with_skills = client._build_native_prompt(messages, include_preamble=True)
+    assert "最新问题" in prompt_with_skills
+    assert "demo-skill" in prompt_with_skills
+
+
+def test_sync_agents_md_writes_rules_to_work_dir(tmp_path) -> None:
+    client = OpenCodeCliClient(settings=_make_settings(tmp_path))
+
+    with patch("core.agent.opencode_cli.load_system_rules", return_value="# rules v1"):
+        client._sync_agents_md()
+    agents_path = tmp_path / "workdir" / "opencode" / "AGENTS.md"
+    assert agents_path.read_text(encoding="utf-8") == "# rules v1"
+
+    with patch("core.agent.opencode_cli.load_system_rules", return_value="# rules v2"):
+        client._sync_agents_md()
+    assert agents_path.read_text(encoding="utf-8") == "# rules v2"
 
 
 def test_extract_session_id_from_event_and_part(tmp_path) -> None:

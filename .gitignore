@@ -9,5 +9,6 @@ __pycache__/
 *.pid
 logs/
 runtime/
-.qoder/
+.qoder/*
+!.qoder/AGENTS.md
 rules/admin.md

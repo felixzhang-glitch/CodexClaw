@@ -156,6 +156,46 @@ class TestConvertEvent:
         assert "段落一" in result.text
         assert "段落二" in result.text
 
+    def test_file_message(self, ws_client: FeishuWsClient):
+        sdk_event = _make_sdk_event(
+            message_type="file",
+            content={"file_key": "file_v3_abc", "file_name": "report.pdf"},
+        )
+        result = ws_client._convert_event(sdk_event)
+
+        assert result is not None
+        assert result.message_type == "file"
+        assert result.file_key == "file_v3_abc"
+        assert result.file_name == "report.pdf"
+        assert result.text == "用户发送了一个文件。"
+
+    def test_audio_message(self, ws_client: FeishuWsClient):
+        sdk_event = _make_sdk_event(
+            message_type="audio",
+            content={"file_key": "audio_v3_abc"},
+        )
+        result = ws_client._convert_event(sdk_event)
+
+        assert result is not None
+        assert result.file_key == "audio_v3_abc"
+        assert result.file_name == ""
+
+    def test_media_message(self, ws_client: FeishuWsClient):
+        sdk_event = _make_sdk_event(
+            message_type="media",
+            content={"file_key": "media_v3_abc", "file_name": "clip.mp4"},
+        )
+        result = ws_client._convert_event(sdk_event)
+
+        assert result is not None
+        assert result.file_key == "media_v3_abc"
+        assert result.file_name == "clip.mp4"
+
+    def test_file_without_key_returns_none(self, ws_client: FeishuWsClient):
+        sdk_event = _make_sdk_event(message_type="file", content={"file_name": "x.pdf"})
+        result = ws_client._convert_event(sdk_event)
+        assert result is None
+
 
 class TestHandleEvent:
     """Test the handle_event integration path."""

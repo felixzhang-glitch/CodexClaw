@@ -382,6 +382,22 @@ class FeishuClient:
         )
         return response.content, content_type
 
+    async def download_message_file(self, message_id: str, file_key: str, trace_id: str) -> tuple[bytes, str]:
+        if not message_id or not file_key:
+            raise FeishuClientError("message_id and file_key are required")
+
+        url = self._settings.feishu_message_resource_url_template.format(
+            message_id=message_id,
+            file_key=file_key,
+        )
+        response, content_type = await self._get_authenticated_bytes(
+            url=url,
+            params={"type": "file"},
+            trace_id=trace_id,
+            event="feishu.download_file",
+        )
+        return response.content, content_type
+
     async def create_reaction(
         self,
         message_id: str,

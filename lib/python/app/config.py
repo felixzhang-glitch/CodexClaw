@@ -27,6 +27,7 @@ class Settings(BaseSettings):
         default="./runtime/feishu-images",
         validation_alias="FEISHU_RECEIVED_IMAGES_DIR",
     )
+    file_archive_dir: str = Field(default="/data/file", validation_alias="FILE_ARCHIVE_DIR")
 
     codex_api_base: str = Field(default="https://api.openai.com/v1", validation_alias="CODEX_API_BASE")
     codex_api_key: str = Field(default="", validation_alias="CODEX_API_KEY")

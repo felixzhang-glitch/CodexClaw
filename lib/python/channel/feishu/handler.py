@@ -103,6 +103,10 @@ class FeishuWebhookHandler:
         session_key = SessionManager.build_key(user_id=event.user_id, chat_id=event.chat_id)
         normalized_text = event.text.strip().lower()
 
+        if str(getattr(event, "file_key", "") or "").strip():
+            await self._handle_file_event(event=event, trace_id=trace_id)
+            return
+
         if normalized_text == "/stop":
             await self._handle_stop_command(
                 message_id=event.message_id,
@@ -387,6 +391,82 @@ class FeishuWebhookHandler:
             trace_id=trace_id,
             request_uuid=f"{message_id}-remind",
         )
+
+    async def _handle_file_event(self, event: Any, trace_id: str) -> None:
+        """Archive a received file to the local archive dir and reply with its path.
+
+        Files bypass the agent backend entirely: download, save, reply 已收藏.
+        """
+        try:
+            file_bytes, content_type = await self._feishu_client.download_message_file(
+                message_id=event.message_id,
+                file_key=event.file_key,
+                trace_id=trace_id,
+            )
+            saved_path = await asyncio.to_thread(
+                self._archive_file_bytes,
+                file_bytes=file_bytes,
+                content_type=content_type,
+                file_key=event.file_key,
+                file_name=str(getattr(event, "file_name", "") or ""),
+            )
+        except (FeishuClientError, OSError):
+            logger.exception(
+                "failed to archive received file",
+                extra={"trace_id": trace_id, "event": "feishu.file_archive"},
+            )
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text="文件收藏失败，请稍后重试。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-file-failed",
+            )
+            return
+
+        logger.info(
+            "received file archived",
+            extra={"trace_id": trace_id, "event": "feishu.file_archive"},
+        )
+        await self._safe_reply(
+            message_id=event.message_id,
+            chat_id=event.chat_id,
+            text=f"已收藏\n{saved_path}",
+            trace_id=trace_id,
+            request_uuid=f"{event.message_id}-file",
+        )
+
+    def _archive_file_bytes(
+        self,
+        file_bytes: bytes,
+        content_type: str,
+        file_key: str,
+        file_name: str,
+    ) -> str:
+        directory = Path(str(getattr(self._settings, "file_archive_dir", "/data/file"))).expanduser()
+        directory.mkdir(parents=True, exist_ok=True)
+
+        name = self._sanitize_file_name(file_name)
+        if not name:
+            suffix = mimetypes.guess_extension(content_type.split(";", 1)[0].strip().lower()) or ""
+            name = f"{self._safe_filename_part(file_key)[:32]}{suffix}"
+
+        target = directory / name
+        stem, suffix = os.path.splitext(name)
+        counter = 1
+        while target.exists():
+            target = directory / f"{stem}-{counter}{suffix}"
+            counter += 1
+        target.write_bytes(file_bytes)
+        return os.path.realpath(target)
+
+    @staticmethod
+    def _sanitize_file_name(file_name: str) -> str:
+        # Keep the basename only and strip path separators / control chars.
+        name = os.path.basename(file_name.strip().replace("\\", "/"))
+        cleaned = "".join(char for char in name if char.isprintable() and char not in {"/", "\0"})
+        cleaned = cleaned.strip(". ")
+        return cleaned
 
     async def _build_user_text(self, event: Any, trace_id: str) -> str:
         text = str(getattr(event, "text", "") or "").strip()

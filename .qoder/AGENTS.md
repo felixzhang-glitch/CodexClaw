@@ -13,19 +13,27 @@
 
 ```
 lib/python/
-  app/            → FastAPI 入口、配置加载、命令分发、日志
-  channel/feishu/ → 飞书渠道全链路（webhook 解析/安全校验/消息回发/图片处理）
+  app/            → FastAPI 入口(main)、配置(config)、命令分发(commands)、规则热加载(rules)、日志
+  channel/feishu/ → 飞书渠道全链路：webhook 解析(handler)、WS 长连接(ws_client)、
+                    安全校验(security)、消息回发(client)、格式化(formatting)、图片(media)
   channel/wechat/ → 微信渠道处理（接收 sidecar 转发的消息）
-  core/agent/     → 多后端路由器 + 各后端 CLI 客户端封装
+  core/agent/     → 多后端路由器(router) + CLI 客户端封装
+                    （claude_cli 同时承载 claude/qodercli，无独立 qodercli 文件）
   core/codex/     → Codex CLI 客户端（超时/重试/熔断）
-  core/session/   → 会话管理、去重、任务注册、定时提醒
+  core/session/   → 会话管理(manager)、去重(deduplicator)、任务注册(task_registry)、定时提醒(reminder_scheduler)
 
 lib/js/
   wechat-sidecar.mjs → 微信 iLink Bot 长轮询 sidecar（Node.js）
 
-bin/              → 服务控制脚本（start/stop/restart/status/wx）
-conf/             → 环境配置、依赖、pytest
+bin/server        → 主控制脚本（start/stop/restart/status/wx login|start|stop）
+bin/start(.sh)    → server 的薄包装
+conf/             → .env 环境配置、requirements、pytest.ini
+rules/            → 注入 opencode 的规则：AGENTS.md 公共 / admin.md 私有（gitignored）
+hooks/            → inject-time.js 时间注入 hook
+skills/           → opencode skills（iqs-search / lark-cli / self-admin / yfinance）
+docs/             → 设计文档(design-docs)、执行计划(exec-plans)、渠道/路由/会话说明
 tests/            → 单元测试
+logs/ runtime/    → 运行时产物（gitignored）
 ```
 
 ## 后端策略
@@ -46,8 +54,14 @@ tests/            → 单元测试
 | 微信消息处理逻辑 | `lib/python/channel/wechat/handler.py` |
 | 后端路由/切换 | `lib/python/core/agent/router.py` |
 | opencode 集成 | `lib/python/core/agent/opencode_cli.py` |
+| 飞书 WS 长连接 | `lib/python/channel/feishu/ws_client.py` |
+| 规则注入 | `lib/python/app/rules.py` + `rules/` |
 | 会话/去重/任务 | `lib/python/core/session/` |
 | 渠道格式化 | `lib/python/channel/feishu/formatting.py` |
 | 配置项 | `lib/python/app/config.py` + `conf/.env.example` |
 | 架构决策 | `docs/design-docs/` |
 | 技术债 | `docs/exec-plans/tech-debt-tracker.md` |
+
+## 开发文档
+- 微信接入参考:https://docs.openclaw.ai/zh-CN/channels/wechat
+- 飞书应用开发: https://open.feishu.cn/document/client-docs/bot-v3/bot-overview

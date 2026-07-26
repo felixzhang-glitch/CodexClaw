@@ -1,7 +1,7 @@
 """Project-level rules loader.
 
 Re-reads rule files on every call so edits take effect without restart.
-rules/system.md is public; rules/admin.md holds private user info and is
+rules/AGENTS.md is public; rules/admin.md holds private user info and is
 gitignored.
 """
 
@@ -11,11 +11,11 @@ import os
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _RULES_DIR = os.path.join(_ROOT, "rules")
-_RULE_FILES = ("system.md", "admin.md")
+_RULE_FILES = ("AGENTS.md", "admin.md")
 
 
 def load_system_rules() -> str:
-    """Return the merged content of rules/system.md and rules/admin.md."""
+    """Return the merged content of rules/AGENTS.md and rules/admin.md."""
     parts: list[str] = []
     for filename in _RULE_FILES:
         try:

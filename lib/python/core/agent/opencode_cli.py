@@ -382,8 +382,10 @@ class OpenCodeCliClient:
 
     async def _spawn_process(self, command: list[str]) -> asyncio.subprocess.Process:
         env = os.environ.copy()
-        # rules must come only from rules/system.md; keep ~/.claude/skills available
+        # rules reach opencode natively via {work_dir}/AGENTS.md (synced below);
+        # keep ~/.claude/skills available
         env["OPENCODE_DISABLE_CLAUDE_CODE_PROMPT"] = "1"
+        self._sync_agents_md()
         hook_plugin = os.path.join(_PROJECT_ROOT, "hooks", "inject-time.js")
         if os.path.isfile(hook_plugin):
             env["OPENCODE_CONFIG_CONTENT"] = json.dumps(
@@ -400,6 +402,26 @@ class OpenCodeCliClient:
             stderr=asyncio.subprocess.PIPE,
             limit=self._settings.codex_stream_read_limit_bytes,
         )
+
+    def _sync_agents_md(self) -> None:
+        """Write merged rules into {work_dir}/AGENTS.md so opencode loads them natively.
+
+        Runs before each spawn so rule edits apply to every run (including
+        resumed sessions). Skips the write when content is unchanged.
+        """
+        rules = load_system_rules()
+        agents_path = os.path.join(self._work_dir, "AGENTS.md")
+        try:
+            with open(agents_path, encoding="utf-8") as fh:
+                if fh.read() == rules:
+                    return
+        except OSError:
+            pass
+        try:
+            with open(agents_path, "w", encoding="utf-8") as fh:
+                fh.write(rules)
+        except OSError:
+            logger.warning("failed to sync %s", agents_path)
 
     async def _readline_with_idle_timeout(self, stream: asyncio.StreamReader | None) -> bytes:
         if stream is None:
@@ -511,18 +533,21 @@ class OpenCodeCliClient:
         if not include_preamble:
             return user_text
 
-        rules = load_system_rules()
-        lines = [rules] if rules else ["仅输出回复正文，不要加额外前缀。"]
+        # Rules are loaded natively from {work_dir}/AGENTS.md; only the skill
+        # summary still needs prompt injection.
+        lines: list[str] = []
         skill_summary = ClaudeCliClient._build_skill_summary()
         if skill_summary:
             lines.extend(
                 [
-                    "",
                     "本机可用 skills 如下。若用户询问 skills，必须基于此列表回答，不要说当前环境没有加载 skill。",
                     skill_summary,
+                    "",
                 ]
             )
-        lines.extend(["", f"用户: {user_text}"])
+        if not lines:
+            return user_text
+        lines.append(f"用户: {user_text}")
         return "\n".join(lines)
 
     def _get_session_id(self, session_key: str | None) -> str | None:
