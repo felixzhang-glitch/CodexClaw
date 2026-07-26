@@ -12,7 +12,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.config import Settings
-from app.rules import load_system_rules
 from core.agent.claude_cli import ClaudeCliClient
 from core.codex.client import CodexClientCancelled, CodexClientError
 
@@ -382,18 +381,13 @@ class OpenCodeCliClient:
 
     async def _spawn_process(self, command: list[str]) -> asyncio.subprocess.Process:
         env = os.environ.copy()
-        # rules reach opencode natively via {work_dir}/AGENTS.md (synced below);
         # keep ~/.claude/skills available
         env["OPENCODE_DISABLE_CLAUDE_CODE_PROMPT"] = "1"
-        self._sync_agents_md()
-        hook_plugin = os.path.join(_PROJECT_ROOT, "hooks", "inject-time.js")
-        if os.path.isfile(hook_plugin):
-            env["OPENCODE_CONFIG_CONTENT"] = json.dumps(
-                {
-                    "$schema": "https://opencode.ai/config.json",
-                    "plugin": [f"file://{hook_plugin}"],
-                }
-            )
+        # asyncio's cwd= does not rewrite the inherited $PWD, and opencode
+        # trusts $PWD when binding a session to a project directory; without
+        # this, sessions bind to the server's cwd and never see the rules.
+        env["PWD"] = self._work_dir
+        env["OPENCODE_CONFIG_CONTENT"] = json.dumps(self._build_config_content())
         return await asyncio.create_subprocess_exec(
             *command,
             cwd=self._work_dir,
@@ -405,25 +399,22 @@ class OpenCodeCliClient:
             start_new_session=True,
         )
 
-    def _sync_agents_md(self) -> None:
-        """Write merged rules into {work_dir}/AGENTS.md so opencode loads them natively.
-
-        Runs before each spawn so rule edits apply to every run (including
-        resumed sessions). Skips the write when content is unchanged.
-        """
-        rules = load_system_rules()
-        agents_path = os.path.join(self._work_dir, "AGENTS.md")
-        try:
-            with open(agents_path, encoding="utf-8") as fh:
-                if fh.read() == rules:
-                    return
-        except OSError:
-            pass
-        try:
-            with open(agents_path, "w", encoding="utf-8") as fh:
-                fh.write(rules)
-        except OSError:
-            logger.warning("failed to sync %s", agents_path)
+    def _build_config_content(self) -> dict[str, Any]:
+        config: dict[str, Any] = {"$schema": "https://opencode.ai/config.json"}
+        instructions = [
+            path
+            for path in (
+                os.path.join(_PROJECT_ROOT, "rules", "AGENTS.md"),
+                os.path.join(_PROJECT_ROOT, "rules", "admin.md"),
+            )
+            if os.path.isfile(path)
+        ]
+        if instructions:
+            config["instructions"] = instructions
+        hook_plugin = os.path.join(_PROJECT_ROOT, "hooks", "inject-time.js")
+        if os.path.isfile(hook_plugin):
+            config["plugin"] = [f"file://{hook_plugin}"]
+        return config
 
     async def _readline_with_idle_timeout(self, stream: asyncio.StreamReader | None) -> bytes:
         if stream is None:
@@ -543,8 +534,8 @@ class OpenCodeCliClient:
         if not include_preamble:
             return user_text
 
-        # Rules are loaded natively from {work_dir}/AGENTS.md; only the skill
-        # summary still needs prompt injection.
+        # Rules are loaded natively via the `instructions` config; only the
+        # skill summary still needs prompt injection.
         lines: list[str] = []
         skill_summary = ClaudeCliClient._build_skill_summary()
         if skill_summary:
@@ -603,15 +594,11 @@ class OpenCodeCliClient:
             )
 
     def _build_prompt(self, messages: list[dict[str, str]]) -> str:
-        rules = load_system_rules()
-        if rules:
-            prompt_lines = [rules, "", "请基于以下多轮对话，直接回复最后一条用户消息。"]
-        else:
-            prompt_lines = [
-                "你是 codeClaw 的后端助手。",
-                "请基于以下多轮对话，直接回复最后一条用户消息。",
-                "仅输出回复正文，不要加额外前缀。",
-            ]
+        # Rules reach opencode natively via the `instructions` config.
+        prompt_lines = [
+            "请基于以下多轮对话，直接回复最后一条用户消息。",
+            "仅输出回复正文，不要加额外前缀。",
+        ]
         skill_summary = ClaudeCliClient._build_skill_summary()
         if skill_summary:
             prompt_lines.extend(

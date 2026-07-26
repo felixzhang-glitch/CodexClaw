@@ -19,7 +19,7 @@ codeClaw 是一个单实例 IM → CLI 桥接服务：接收飞书或微信私�
 - `rules/AGENTS.md`（公共规则）+ `rules/admin.md`（私人信息，已 gitignore 脱敏），每条消息动态加载，改完即生效无需重启
 - `skills/` 项目级技能目录，每条消息实时扫描注入可用列表
 - `hooks/inject-time.js` 时间感知：opencode 插件在每条用户消息注入当前系统时间
-- 提示词隔离：opencode 只读 rules（同步到工作目录 `AGENTS.md` 原生加载），不读 `~/.claude/CLAUDE.md`（禁用 Claude 兼容提示词）
+- 提示词隔离：opencode 只读 rules（通过 `instructions` 配置原生加载 `rules/AGENTS.md` + `rules/admin.md`），不读 `~/.claude/CLAUDE.md`（禁用 Claude 兼容提示词）
 
 **多后端路由**
 - `opencode` / `codex` / `claude` / `qodercli` 四后端，运行时通过 `/opencode` `/codex` `/claude` `/qodercli` 切换
@@ -152,7 +152,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 | `rules/admin.md` | 私人信息：管理员身份、个人偏好 | 否（已 gitignore） |
 | `rules/admin.md.example` | admin.md 脱敏范例，复制后填写 | 是 |
 
-两个文件在每条消息处理时合并加载（`AGENTS.md` + `admin.md`），**修改后立即生效，无需重启**。opencode 后端的规则会在每次运行前同步到工作目录 `AGENTS.md` 原生加载，规则更新对新老会话均即时生效。
+两个文件在每条消息处理时合并加载（`AGENTS.md` + `admin.md`），**修改后立即生效，无需重启**。opencode 后端通过 `OPENCODE_CONFIG_CONTENT` 的 `instructions` 配置直接原生加载这两个源文件（admin.md 不落盘拷贝），规则更新对新老会话均即时生效。
 
 ```bash
 cp rules/admin.md.example rules/admin.md   # 首次使用
