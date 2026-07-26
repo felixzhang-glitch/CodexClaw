@@ -19,7 +19,8 @@ HELP_TEXT = (
     "/qodercli - 切换后端为 Qoder CLI\n"
     "/opencode - 切换后端为 OpenCode CLI\n"
     "/skills - 列出本机可用 skills\n"
-    "/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）"
+    "/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）\n"
+    "/daily HH:MM 提示词 - 每日定时简报（/daily list 查看，/daily cancel <id> 取消）"
 )
 
 
@@ -42,6 +43,7 @@ def build_help_text(*, include_remind: bool = True) -> str:
         lines.append("/remind 10m 内容 - 定时发送提醒（支持 s/m/h/d）")
     else:
         lines.append("/remind - 微信渠道暂不支持")
+    lines.append("/daily HH:MM 提示词 - 每日定时简报（/daily list 查看，/daily cancel <id> 取消）")
     return "\n".join(lines)
 
 BACKEND_COMMANDS: dict[str, str] = {
@@ -62,6 +64,76 @@ class CommandResult:
 class ReminderCommand:
     delay_seconds: float
     text: str
+
+
+@dataclass(slots=True)
+class DailyCommand:
+    action: str  # "create" | "list" | "cancel" | "invalid"
+    hour: int = 0
+    minute: int = 0
+    prompt: str = ""
+    task_id_prefix: str = ""
+    error: str = ""
+
+
+def parse_daily_command(raw_text: str) -> DailyCommand | None:
+    text = raw_text.strip()
+    if not text.lower().startswith("/daily"):
+        return None
+
+    rest = text[len("/daily"):].strip()
+    if not rest or rest.lower() in {"list", "ls"}:
+        return DailyCommand(action="list")
+
+    cancel_match = re.match(r"^cancel\s+(\S+)$", rest, re.IGNORECASE)
+    if cancel_match is not None:
+        return DailyCommand(action="cancel", task_id_prefix=cancel_match.group(1))
+
+    create_match = re.match(r"^(\d{1,2}):(\d{2})\s+(.+)$", rest, re.DOTALL)
+    if create_match is not None:
+        hour = int(create_match.group(1))
+        minute = int(create_match.group(2))
+        prompt = create_match.group(3).strip()
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return DailyCommand(action="invalid", error="时间格式错误，应为 HH:MM（00:00-23:59）。")
+        if not prompt:
+            return DailyCommand(action="invalid", error="缺少简报提示词。")
+        return DailyCommand(action="create", hour=hour, minute=minute, prompt=prompt)
+
+    return DailyCommand(
+        action="invalid",
+        error="用法: /daily HH:MM 提示词 | /daily list | /daily cancel <id前缀>",
+    )
+
+
+async def execute_daily_command(daily: DailyCommand, scheduler: Any, channel: str, target_id: str) -> str:
+    if daily.action == "invalid":
+        return daily.error
+
+    if daily.action == "create":
+        task = await scheduler.schedule(
+            channel=channel,
+            target_id=target_id,
+            prompt=daily.prompt,
+            hour=daily.hour,
+            minute=daily.minute,
+        )
+        return f"已创建每日简报任务 {task.task_id[:8]}，每天 {daily.hour:02d}:{daily.minute:02d} 执行。"
+
+    if daily.action == "cancel":
+        task = await scheduler.cancel(daily.task_id_prefix)
+        if task is None:
+            return f"未找到唯一匹配的任务: {daily.task_id_prefix}（用 /daily list 查看）。"
+        return f"已取消每日简报任务 {task.task_id[:8]}。"
+
+    tasks = scheduler.list_tasks()
+    if not tasks:
+        return "当前没有每日简报任务。用 /daily HH:MM 提示词 创建。"
+    lines = ["每日简报任务:"]
+    for task in tasks:
+        summary = task.prompt if len(task.prompt) <= 30 else f"{task.prompt[:30]}…"
+        lines.append(f"- {task.task_id[:8]} {task.hour:02d}:{task.minute:02d} [{task.channel}] {summary}")
+    return "\n".join(lines)
 
 
 def process_command(

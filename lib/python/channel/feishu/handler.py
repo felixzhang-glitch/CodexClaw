@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from app.commands import parse_reminder_command, process_command
+from app.commands import execute_daily_command, parse_daily_command, parse_reminder_command, process_command
 from app.config import Settings
 from channel.feishu.client import FeishuClient, FeishuClientError
 from channel.feishu.formatting import normalize_reply_text, split_message_text
@@ -36,8 +36,10 @@ from channel.feishu.security import (
 from core.agent.claude_cli import ClaudeCliClient
 from core.agent.types import BackendClient
 from core.codex.client import CodexClientCancelled
+from core.session.daily_scheduler import DailyTaskScheduler
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
+from core.session.message_queue import SessionMessageQueue
 from core.session.reminder_scheduler import ReminderScheduler
 from core.session.task_registry import ActiveTaskRegistry
 
@@ -54,6 +56,8 @@ class FeishuWebhookHandler:
         deduplicator: MessageDeduplicator,
         task_registry: ActiveTaskRegistry,
         reminder_scheduler: ReminderScheduler | None = None,
+        daily_scheduler: DailyTaskScheduler | None = None,
+        message_queue: SessionMessageQueue | None = None,
     ) -> None:
         self._settings = settings
         self._feishu_client = feishu_client
@@ -62,6 +66,8 @@ class FeishuWebhookHandler:
         self._deduplicator = deduplicator
         self._task_registry = task_registry
         self._reminder_scheduler = reminder_scheduler
+        self._daily_scheduler = daily_scheduler
+        self._message_queue = message_queue or SessionMessageQueue(max_pending=10)
         self._downloaded_image_paths: list[str] = []
 
     async def handle_event(self, event: FeishuTextMessageEvent) -> None:
@@ -118,34 +124,17 @@ class FeishuWebhookHandler:
 
         await self._send_quick_ack(message_id=event.message_id, trace_id=trace_id)
 
-        active_task = self._task_registry.get(session_key)
-        if active_task is not None:
-            await self._safe_reply(
+        daily = parse_daily_command(event.text)
+        if daily is not None:
+            await self._handle_daily_command(
                 message_id=event.message_id,
                 chat_id=event.chat_id,
-                text="当前已有任务在运行中。发送 /stop 可强制终止后再试。",
+                daily=daily,
                 trace_id=trace_id,
-                request_uuid=f"{event.message_id}-busy",
             )
             return
 
-        try:
-            user_text = await self._build_user_text(event=event, trace_id=trace_id)
-        except FeishuClientError:
-            logger.exception(
-                "failed to download received image",
-                extra={"trace_id": trace_id, "event": "feishu.image_download"},
-            )
-            await self._safe_reply(
-                message_id=event.message_id,
-                chat_id=event.chat_id,
-                text="图片下载失败，请稍后重试。",
-                trace_id=trace_id,
-                request_uuid=f"{event.message_id}-image-download-failed",
-            )
-            return
-
-        reminder = parse_reminder_command(user_text)
+        reminder = parse_reminder_command(event.text)
         if reminder is not None:
             await self._handle_reminder_command(
                 message_id=event.message_id,
@@ -157,7 +146,7 @@ class FeishuWebhookHandler:
             return
 
         command = process_command(
-            user_text,
+            event.text,
             session_manager=self._sessions,
             session_key=session_key,
             router=self._codex_client,
@@ -184,6 +173,56 @@ class FeishuWebhookHandler:
                 text=reply,
                 trace_id=trace_id,
                 request_uuid=f"{event.message_id}-skills",
+            )
+            return
+
+        done_future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+        async def job() -> None:
+            try:
+                await self._run_llm_job(event=event, session_key=session_key, trace_id=trace_id)
+            finally:
+                if not done_future.done():
+                    done_future.set_result(None)
+
+        def on_drop() -> None:
+            if not done_future.done():
+                done_future.set_result(None)
+
+        status = await self._message_queue.submit(session_key, job, on_drop=on_drop)
+        if not status.accepted:
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text="当前会话排队消息已满，请稍后再发，或发送 /stop 终止当前任务并清空队列。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-busy",
+            )
+            return
+        if status.position > 0:
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text=f"已排队，前面还有 {status.position} 条消息，将按顺序处理。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-queued",
+            )
+        await done_future
+
+    async def _run_llm_job(self, event: Any, session_key: str, trace_id: str) -> None:
+        try:
+            user_text = await self._build_user_text(event=event, trace_id=trace_id)
+        except FeishuClientError:
+            logger.exception(
+                "failed to download received image",
+                extra={"trace_id": trace_id, "event": "feishu.image_download"},
+            )
+            await self._safe_reply(
+                message_id=event.message_id,
+                chat_id=event.chat_id,
+                text="图片下载失败，请稍后重试。",
+                trace_id=trace_id,
+                request_uuid=f"{event.message_id}-image-download-failed",
             )
             return
 
@@ -342,8 +381,9 @@ class FeishuWebhookHandler:
         return answer
 
     async def _handle_stop_command(self, message_id: str, chat_id: str, session_key: str, trace_id: str) -> None:
+        dropped = await self._message_queue.clear(session_key)
         task = self._task_registry.cancel(session_key)
-        if task is None:
+        if task is None and dropped == 0:
             await self._safe_reply(
                 message_id=message_id,
                 chat_id=chat_id,
@@ -353,12 +393,42 @@ class FeishuWebhookHandler:
             )
             return
 
+        parts = []
+        if task is not None:
+            parts.append("已收到停止请求，正在强制终止当前任务。")
+        if dropped > 0:
+            parts.append(f"已清空排队消息 {dropped} 条。")
         await self._safe_reply(
             message_id=message_id,
             chat_id=chat_id,
-            text="已收到停止请求，正在强制终止当前任务。",
+            text=" ".join(parts),
             trace_id=trace_id,
             request_uuid=f"{message_id}-stop",
+        )
+
+    async def _handle_daily_command(self, message_id: str, chat_id: str, daily: Any, trace_id: str) -> None:
+        if self._daily_scheduler is None:
+            await self._safe_reply(
+                message_id=message_id,
+                chat_id=chat_id,
+                text="每日简报组件未启用。",
+                trace_id=trace_id,
+                request_uuid=f"{message_id}-daily-disabled",
+            )
+            return
+
+        reply = await execute_daily_command(
+            daily=daily,
+            scheduler=self._daily_scheduler,
+            channel="feishu",
+            target_id=chat_id,
+        )
+        await self._safe_reply(
+            message_id=message_id,
+            chat_id=chat_id,
+            text=reply,
+            trace_id=trace_id,
+            request_uuid=f"{message_id}-daily",
         )
 
     async def _handle_reminder_command(

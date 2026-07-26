@@ -74,8 +74,13 @@ class Settings(BaseSettings):
     feishu_message_chunk_chars: int = Field(default=1500, validation_alias="FEISHU_MESSAGE_CHUNK_CHARS")
     wechat_webhook_token: str = Field(default="", validation_alias="WECHAT_WEBHOOK_TOKEN")
     wechat_message_chunk_chars: int = Field(default=1800, validation_alias="WECHAT_MESSAGE_CHUNK_CHARS")
+    wechat_sidecar_base_url: str = Field(default="http://127.0.0.1:8787", validation_alias="WECHAT_SIDECAR_BASE_URL")
     deduplicate_ttl_seconds: int = Field(default=3600, validation_alias="DEDUPLICATE_TTL_SECONDS")
     reminder_store_path: str = Field(default="./runtime/server/reminders.json", validation_alias="REMINDER_STORE_PATH")
+    daily_task_store_path: str = Field(
+        default="./runtime/server/daily-tasks.json",
+        validation_alias="DAILY_TASK_STORE_PATH",
+    )
 
     server_host: str = Field(default="0.0.0.0", validation_alias="SERVER_HOST")
     server_port: int = Field(default=8080, validation_alias="SERVER_PORT")

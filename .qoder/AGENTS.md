@@ -62,6 +62,11 @@ logs/ runtime/    → 运行时产物（gitignored）
 | 架构决策 | `docs/design-docs/` |
 | 技术债 | `docs/exec-plans/tech-debt-tracker.md` |
 
+> 约定：每次需求变化（新功能/行为调整/缺陷修复）完成后，在 `docs/design-docs/requirement-changes.md` 顶部追加一条记录（日期 + 需求内容 + 影响范围）。
+
+## 指令
+- 每次开发完更新docs文档
+
 ## 开发文档
 - 微信接入参考:https://docs.openclaw.ai/zh-CN/channels/wechat
 - 飞书应用开发: https://open.feishu.cn/document/client-docs/bot-v3/bot-overview

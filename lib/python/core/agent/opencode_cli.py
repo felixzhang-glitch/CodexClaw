@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 import os
+import signal
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -275,8 +276,7 @@ class OpenCodeCliClient:
             self._cancel_requests.add(trace_id)
 
         if process.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
+            self._kill_process_group(process)
         return True
 
     async def _run_stream_once(
@@ -398,9 +398,11 @@ class OpenCodeCliClient:
             *command,
             cwd=self._work_dir,
             env=env,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=self._settings.codex_stream_read_limit_bytes,
+            start_new_session=True,
         )
 
     def _sync_agents_md(self) -> None:
@@ -441,8 +443,16 @@ class OpenCodeCliClient:
     async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is not None:
             return
-        process.kill()
+        self._kill_process_group(process)
         await process.wait()
+
+    @staticmethod
+    def _kill_process_group(process: asyncio.subprocess.Process) -> None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
 
     def _register_process(self, trace_id: str, process: asyncio.subprocess.Process) -> None:
         with self._process_lock:

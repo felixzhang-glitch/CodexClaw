@@ -10,14 +10,22 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from app.commands import build_help_text, parse_reminder_command, process_command
+from app.commands import (
+    build_help_text,
+    execute_daily_command,
+    parse_daily_command,
+    parse_reminder_command,
+    process_command,
+)
 from app.config import Settings
 from channel.feishu.formatting import normalize_reply_text, split_message_text
 from core.agent.claude_cli import ClaudeCliClient
 from core.agent.types import BackendClient
 from core.codex.client import CodexClientCancelled
+from core.session.daily_scheduler import DailyTaskScheduler
 from core.session.deduplicator import MessageDeduplicator
 from core.session.manager import SessionManager
+from core.session.message_queue import SessionMessageQueue
 from core.session.task_registry import ActiveTaskRegistry
 
 logger = logging.getLogger(__name__)
@@ -42,12 +50,16 @@ class WeChatWebhookHandler:
         session_manager: SessionManager,
         deduplicator: MessageDeduplicator,
         task_registry: ActiveTaskRegistry,
+        daily_scheduler: DailyTaskScheduler | None = None,
+        message_queue: SessionMessageQueue | None = None,
     ) -> None:
         self._settings = settings
         self._codex_client = codex_client
         self._sessions = session_manager
         self._deduplicator = deduplicator
         self._task_registry = task_registry
+        self._daily_scheduler = daily_scheduler
+        self._message_queue = message_queue or SessionMessageQueue(max_pending=3)
 
     async def handle_webhook(self, headers: Mapping[str, str], raw_body: bytes) -> dict[str, Any]:
         self._verify_token(headers)
@@ -71,17 +83,31 @@ class WeChatWebhookHandler:
         normalized_text = event.text.strip().lower()
 
         if normalized_text == "/stop":
+            dropped = await self._message_queue.clear(session_key)
             task = self._task_registry.cancel(session_key)
-            if task is None:
+            if task is None and dropped == 0:
                 return self._split_reply("当前没有可终止的运行中任务。")
-            return self._split_reply("已收到停止请求，正在强制终止当前任务。")
+            parts = []
+            if task is not None:
+                parts.append("已收到停止请求，正在强制终止当前任务。")
+            if dropped > 0:
+                parts.append(f"已清空排队消息 {dropped} 条。")
+            return self._split_reply(" ".join(parts))
 
         if normalized_text == "/help":
             return self._split_reply(WECHAT_HELP_TEXT)
 
-        active_task = self._task_registry.get(session_key)
-        if active_task is not None:
-            return self._split_reply("当前已有任务在运行中。发送 /stop 可强制终止后再试。")
+        daily = parse_daily_command(event.text)
+        if daily is not None:
+            if self._daily_scheduler is None:
+                return self._split_reply("每日简报组件未启用。")
+            reply = await execute_daily_command(
+                daily=daily,
+                scheduler=self._daily_scheduler,
+                channel="wechat",
+                target_id=event.user_id,
+            )
+            return self._split_reply(reply)
 
         reminder = parse_reminder_command(event.text)
         if reminder is not None:
@@ -102,6 +128,30 @@ class WeChatWebhookHandler:
                 return self._split_reply("当前本机未发现可用 skills。")
             return self._split_reply(f"当前本机可用 skills:\n{skills}")
 
+        result_future: asyncio.Future[list[str]] = asyncio.get_running_loop().create_future()
+
+        async def job() -> None:
+            replies = await self._run_llm_job(event=event, session_key=session_key, trace_id=trace_id)
+            if not result_future.done():
+                result_future.set_result(replies)
+
+        def on_drop() -> None:
+            if not result_future.done():
+                result_future.set_result(self._split_reply("该消息已被 /stop 清出队列，未处理。"))
+
+        status = await self._message_queue.submit(session_key, job, on_drop=on_drop)
+        if not status.accepted:
+            return self._split_reply("当前会话排队消息已满，请稍后再发，或发送 /stop 终止当前任务并清空队列。")
+        # Hold the webhook request until the queued job completes so the reply
+        # maps to this message (sidecar timeout applies to queue wait + run).
+        try:
+            return await result_future
+        except asyncio.CancelledError:
+            if not result_future.done():
+                result_future.cancel()
+            raise
+
+    async def _run_llm_job(self, event: WeChatTextMessageEvent, session_key: str, trace_id: str) -> list[str]:
         history_messages = self._sessions.build_messages(session_key)
         messages = history_messages + [{"role": "user", "content": event.text}]
 
