@@ -3,6 +3,12 @@
 > 本文件稳定维护：每次需求变化（新功能、行为调整、架构决策变更）在此追加一条记录。
 > 格式：日期 + 版本/提交 + 需求内容 + 影响范围。新记录添加在最上方。
 
+## 2026-07-27 · 项目定位更新：GitHub About + README 重写
+
+- GitHub About 更新为：「Harness 范式的工程落地：核心能力交给 opencode，codeClaw 收敛为接入层 + 后端路由」
+- README 重写：新增设计哲学章节（能力归 agent，编排归 harness）；补全遗漏功能（`/daily`、文件归档 `FILE_ARCHIVE_DIR`、消息队列）；配置表精简为常改项；项目结构与 docs 单层目录同步；312 行 → 230 行
+- 影响：README.md、GitHub 仓库描述，无代码变更
+
 ## 2026-07-27 · 文档整理：docs 拍平 + AGENTS.md 精简
 
 - docs 拍平为单层目录，统一小写连字符命名：`ARCHITECTURE/CHANNELS/ROUTING/SESSIONS/FUNCTIONAL-TESTS` → 小写；`design-docs/` 下文件全部迁出后移除该目录

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-个人 IM -> CLI 桥接服务。飞书 + 微信双通道接入，opencode 为核心后端。
+个人 IM -> CLI 桥接服务。飞书 + 微信双通道接入，opencode 为核心后端。纯harnees开发
 
 ## 核心规则
 
@@ -36,6 +36,7 @@ docs/index.md     → 项目文档索引（架构/渠道/路由/会话/回归清
 
 ## 指令
 - 每次开发完更新docs文档
+- 推送github优先使用gh, 推送包括.qoder文件夹内容, 但是注意脱敏, 一般rules里面的admin.md 还有其他用户没注意到的你也要检查, 不要推送带有明显用户敏感信息的数据到github
 
 ## 开发文档
 - 微信接入参考:https://docs.openclaw.ai/zh-CN/channels/wechat
