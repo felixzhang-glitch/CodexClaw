@@ -402,8 +402,10 @@ class OpenCodeCliClient:
     def _build_config_content(self) -> dict[str, Any]:
         config: dict[str, Any] = {"$schema": "https://opencode.ai/config.json"}
         # `opencode run` is non-interactive: any permission "ask" is auto-rejected
-        # and the turn aborts with empty output, so allow everything up front.
-        config["permission"] = {"edit": "allow", "bash": "allow", "webfetch": "allow"}
+        # and the turn aborts with empty output. Enumerated keys missed
+        # external_directory (workdir is outside the repo root), so use the
+        # wildcard to cover current and future permission types.
+        config["permission"] = {"*": "allow"}
         instructions = [
             path
             for path in (
