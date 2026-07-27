@@ -1,0 +1,12 @@
+# 文档索引
+
+| 文档 | 主题 |
+|------|------|
+| [architecture.md](architecture.md) | 系统架构与技术栈 |
+| [channels.md](channels.md) | 渠道接入：飞书 WS 长连接 / 微信 sidecar |
+| [routing.md](routing.md) | 多后端路由：切换命令、隔离策略、调用方式与设计决策 |
+| [sessions.md](sessions.md) | 会话与任务管理：会话记忆、去重、定时任务 |
+| [core-beliefs.md](core-beliefs.md) | 核心设计信念与边界约束（opencode-first、只做桥接） |
+| [functional-tests.md](functional-tests.md) | 核心功能回归测试清单（迭代验收必过） |
+| [requirement-changes.md](requirement-changes.md) | 需求变更记录（每次需求变化追加，稳定维护） |
+| references/ | 外部参考资料（opencode CLI 用法等） |

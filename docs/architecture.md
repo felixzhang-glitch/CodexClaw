@@ -62,9 +62,7 @@ codeClaw/
 │   └── js/
 │       └── wechat-sidecar.mjs  # 微信 sidecar
 ├── tests/                      # 单元测试
-├── docs/                       # 设计文档与执行计划
-├── AGENTS.md                   # 核心规则地图
-└── ARCHITECTURE.md             # 本文件
+└── docs/                       # 项目文档（单层目录，本文件为 architecture.md，索引见 index.md）
 ```
 
 ## 部署
