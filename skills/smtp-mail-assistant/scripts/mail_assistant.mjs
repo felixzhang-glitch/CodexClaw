@@ -15,6 +15,31 @@ const DEFAULT_SMTP_PORT = 465;
 const DEFAULT_POP3_HOST = "pop.163.com";
 const DEFAULT_POP3_PORT = 995;
 const SOCKET_TIMEOUT_MS = 30_000;
+// 163 Mail caps attachments around 50MB; keep headroom for base64 overhead.
+const MAX_ATTACHMENT_TOTAL_BYTES = 45 * 1024 * 1024;
+
+const MIME_TYPES = {
+  pdf: "application/pdf",
+  zip: "application/zip",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  json: "application/json",
+  xml: "application/xml",
+  html: "text/html",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+};
 
 const ENV_FILE =
   process.env.MAIL_ASSISTANT_ENV_FILE ||
@@ -58,6 +83,17 @@ const LIMIT_PATTERNS = [
 ];
 const BODY_PATTERNS = [/(正文|详情|全文|完整|内容)/, /\b(body|detail|full)\b/i];
 
+// Match the LAST standalone attachment keyword so body text like "见附件" stays intact.
+const ATTACHMENT_SEGMENT_PATTERN =
+  /^(?<before>[\s\S]*)(?:^|[\s，,。;；])(?:附件|attachments?|attach)[:：]?\s+(?<paths>\S[\s\S]*)$/i;
+
+function extractAttachmentPaths(text) {
+  const match = text.match(ATTACHMENT_SEGMENT_PATTERN);
+  if (!match) return { remaining: text, paths: [] };
+  const paths = match.groups.paths.split(/[\s,，]+/).filter(Boolean);
+  return { remaining: match.groups.before.trim(), paths };
+}
+
 function parseSubjectAndBody(rest) {
   const text = rest.trim();
   if (!text) return { subject: DEFAULT_SUBJECT, body: DEFAULT_BODY };
@@ -86,8 +122,15 @@ function parseInstruction(instruction) {
   for (const pattern of SEND_PATTERNS) {
     const match = text.match(pattern);
     if (!match) continue;
-    const { subject, body } = parseSubjectAndBody(match.groups.rest || "");
-    return { type: "send", toEmail: match.groups.email.trim(), subject, body };
+    const { remaining, paths } = extractAttachmentPaths(match.groups.rest || "");
+    const { subject, body } = parseSubjectAndBody(remaining);
+    return {
+      type: "send",
+      toEmail: match.groups.email.trim(),
+      subject,
+      body,
+      attachments: paths,
+    };
   }
 
   if (LIST_PATTERN.test(text)) {
@@ -106,7 +149,8 @@ function parseInstruction(instruction) {
   throw new MailAssistantError(
     "无法识别命令。示例：\n" +
       "1) 给 user@example.com 发邮件 主题 会议 内容 明天 10 点开会\n" +
-      "2) 查看最近5封邮件",
+      "2) 给 user@example.com 发邮件 内容 报表见附件 附件 /tmp/report.pdf\n" +
+      "3) 查看最近5封邮件",
   );
 }
 
@@ -212,26 +256,109 @@ function rfc2822Date(date = new Date()) {
   );
 }
 
-function buildMessage(config, action) {
-  const bodyBase64 = Buffer.from(action.body, "utf-8")
-    .toString("base64")
-    .replace(/(.{76})/g, "$1\r\n");
+// ---------- attachments ----------
+
+function expandHomePath(rawPath) {
+  if (rawPath === "~") return os.homedir();
+  if (rawPath.startsWith("~/")) return path.join(os.homedir(), rawPath.slice(2));
+  return rawPath;
+}
+
+function guessMimeType(filename) {
+  const ext = path.extname(filename).slice(1).toLowerCase();
+  return MIME_TYPES[ext] || "application/octet-stream";
+}
+
+function formatBytes(size) {
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)}KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function resolveAttachments(paths) {
+  const attachments = [];
+  const seen = new Set();
+  let totalBytes = 0;
+  for (const rawPath of paths) {
+    const filePath = path.resolve(expandHomePath(rawPath));
+    if (seen.has(filePath)) continue;
+    seen.add(filePath);
+    if (!fs.existsSync(filePath)) {
+      throw new MailAssistantError(`附件不存在: ${rawPath}`);
+    }
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      throw new MailAssistantError(`附件不是文件: ${rawPath}`);
+    }
+    totalBytes += stat.size;
+    if (totalBytes > MAX_ATTACHMENT_TOTAL_BYTES) {
+      throw new MailAssistantError(
+        `附件总大小超过 ${formatBytes(MAX_ATTACHMENT_TOTAL_BYTES)} 限制`,
+      );
+    }
+    attachments.push({
+      filePath,
+      filename: path.basename(filePath),
+      size: stat.size,
+      mimeType: guessMimeType(filePath),
+    });
+  }
+  return attachments;
+}
+
+function encodeBase64Lines(buffer) {
+  return buffer.toString("base64").replace(/(.{76})/g, "$1\r\n");
+}
+
+function buildMessage(config, action, attachments) {
+  const bodyBase64 = encodeBase64Lines(Buffer.from(action.body, "utf-8"));
   const messageId = `<${Date.now()}.${crypto.randomBytes(8).toString("hex")}@mail-assistant>`;
-  return [
+  const headerLines = [
     `From: ${config.emailAddress}`,
     `To: ${action.toEmail}`,
     `Subject: ${encodeHeaderValue(action.subject)}`,
     `Date: ${rfc2822Date()}`,
     `Message-ID: ${messageId}`,
     "MIME-Version: 1.0",
+  ];
+
+  if (attachments.length === 0) {
+    return [
+      ...headerLines,
+      'Content-Type: text/plain; charset=utf-8',
+      "Content-Transfer-Encoding: base64",
+      "",
+      bodyBase64,
+    ].join("\r\n");
+  }
+
+  const boundary = `=_mail-assistant_${crypto.randomBytes(12).toString("hex")}`;
+  const lines = [
+    ...headerLines,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
     'Content-Type: text/plain; charset=utf-8',
     "Content-Transfer-Encoding: base64",
     "",
     bodyBase64,
-  ].join("\r\n");
+  ];
+  for (const attachment of attachments) {
+    const encodedName = encodeHeaderValue(attachment.filename);
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: ${attachment.mimeType}; name="${encodedName}"`,
+      `Content-Disposition: attachment; filename="${encodedName}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      encodeBase64Lines(fs.readFileSync(attachment.filePath)),
+    );
+  }
+  lines.push(`--${boundary}--`);
+  return lines.join("\r\n");
 }
 
-async function sendEmail(config, action) {
+async function sendEmail(config, action, attachments) {
   const socket = await connectTls(config.smtpHost, config.smtpPort);
   const reader = new LineReader(socket);
   try {
@@ -243,7 +370,7 @@ async function sendEmail(config, action) {
     await smtpExpect(socket, reader, `MAIL FROM:<${config.emailAddress}>`, [250]);
     await smtpExpect(socket, reader, `RCPT TO:<${action.toEmail}>`, [250, 251]);
     await smtpExpect(socket, reader, "DATA", [354]);
-    await smtpExpect(socket, reader, buildMessage(config, action) + "\r\n.", [250]);
+    await smtpExpect(socket, reader, buildMessage(config, action, attachments) + "\r\n.", [250]);
     socket.write("QUIT\r\n");
   } finally {
     socket.destroy();
@@ -474,6 +601,7 @@ function parseArgs(argv) {
     smtpPort: Number(process.env.MAIL_ASSISTANT_SMTP_PORT || DEFAULT_SMTP_PORT),
     pop3Host: process.env.MAIL_ASSISTANT_POP3_HOST || DEFAULT_POP3_HOST,
     pop3Port: Number(process.env.MAIL_ASSISTANT_POP3_PORT || DEFAULT_POP3_PORT),
+    attachments: [],
     dryRun: false,
   };
   const valueFlags = {
@@ -488,6 +616,11 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--dry-run") {
       args.dryRun = true;
+    } else if (arg === "--attach") {
+      const value = argv[i + 1];
+      if (value === undefined) throw new MailAssistantError(`缺少参数值: ${arg}`);
+      args.attachments.push(value);
+      i += 1;
     } else if (valueFlags[arg]) {
       const value = argv[i + 1];
       if (value === undefined) throw new MailAssistantError(`缺少参数值: ${arg}`);
@@ -501,7 +634,7 @@ function parseArgs(argv) {
   }
   if (args.instruction === null) {
     throw new MailAssistantError(
-      '用法: bun scripts/mail_assistant.mjs "<自然语言指令>" [--dry-run] [--email ...] [--auth-code ...]',
+      '用法: bun scripts/mail_assistant.mjs "<自然语言指令>" [--dry-run] [--attach <文件>]... [--email ...] [--auth-code ...]',
     );
   }
   return args;
@@ -552,6 +685,10 @@ async function main() {
   try {
     const args = parseArgs(process.argv.slice(2));
     const action = parseInstruction(args.instruction);
+    const attachments =
+      action.type === "send"
+        ? resolveAttachments([...action.attachments, ...args.attachments])
+        : [];
 
     if (args.dryRun) {
       if (action.type === "send") {
@@ -560,6 +697,10 @@ async function main() {
         console.log(`To: ${action.toEmail}`);
         console.log(`Subject: ${action.subject}`);
         console.log(`Body: ${action.body}`);
+        console.log(`Attachments: ${attachments.length}`);
+        for (const item of attachments) {
+          console.log(`  - ${item.filename} (${formatBytes(item.size)}, ${item.mimeType})`);
+        }
       } else {
         console.log("DRY RUN - ListAction");
         console.log(`Limit: ${action.limit}`);
@@ -570,13 +711,14 @@ async function main() {
 
     const config = buildConfig(args);
     if (action.type === "send") {
-      await sendEmail(config, action);
+      await sendEmail(config, action, attachments);
       const pad = (n) => String(n).padStart(2, "0");
       const now = new Date();
       const stamp =
         `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
         `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-      console.log(`[${stamp}] 邮件发送成功: ${action.toEmail}`);
+      const suffix = attachments.length > 0 ? `（附件 ${attachments.length} 个）` : "";
+      console.log(`[${stamp}] 邮件发送成功: ${action.toEmail}${suffix}`);
       return 0;
     }
 
