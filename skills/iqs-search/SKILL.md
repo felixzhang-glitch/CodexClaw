@@ -1,201 +1,201 @@
 ---
 name: iqs-search
-description: Real-time web search and page reading using Aliyun IQS APIs. Use this skill FIRST when the user needs current information, news, facts verification, URL content extraction, or any web-based research. This skill provides structured search results with source links, markdown-formatted content extraction, and supports various search engines including real-time news search and deep research modes.
+description: 使用阿里云IQS API进行实时网页搜索和页面阅读。当用户需要最新信息、新闻、事实核查、URL内容提取或任何基于网络的研究时，优先使用此技能。此技能提供结构化搜索结果（含来源链接）、Markdown格式内容提取，并支持多种搜索引擎，包括实时新闻搜索和深度研究模式。
 ---
 
 # alibabacloud-iqs-search
 
-## Prerequisites
+## 前置条件
 
-- Node.js >= 18.0.0 (scripts use native fetch API, no external npm dependencies)
+- Bun >= 1.0.0（脚本使用原生fetch API，无外部npm依赖）
 
-## When to Use
+## 使用时机
 
-- User asks for current/recent information
-- User provides a URL to read
-- Need to verify facts or get real-time data
-- Research tasks requiring multiple sources
+- 用户询问当前/近期信息
+- 用户提供URL要求阅读
+- 需要核查事实或获取实时数据
+- 需要多源信息的研究任务
 
-## Decision Tree
+## 决策流程
 
-### Step 1: Determine Operation Type
+### 步骤1：确定操作类型
 
-- If user provides a URL → Use `readpage`
-- If user asks a question needing web info → Use `search`
+- 如果用户提供URL → 使用 `readpage`
+- 如果用户提问需要网络信息 → 使用 `search`
 
-### Step 2: For Search Operations
+### 步骤2：搜索操作
 
-Follow the best practices to determine parameter values. Use default values when uncertain:
+按照最佳实践确定参数值。不确定时使用默认值：
 
 - **engineType**
 - **timeRange**
 - **contents**
 
-### Step 3: For Page Reading
+### 步骤3：页面阅读
 
-Follow the best practices to determine parameter values. Use default values when uncertain:
+按照最佳实践确定参数值。不确定时使用默认值：
 
 - **format**
 - **extractArticle**
 - **stealthMode**
 
-### CRITICAL: Execution Method
+### 关键：执行方式
 
-**You MUST execute the scripts via bash command (e.g., `node scripts/search.mjs ...` or `node scripts/readpage.mjs ...`). Do NOT use your built-in web_search, WebFetch, or any other internal tools as substitutes. If the script fails, retry or report the error — do NOT fall back to built-in tools.**
+**必须通过bash命令执行脚本（例如 `bun scripts/search.ts ...` 或 `bun scripts/readpage.ts ...`）。不得使用内置的web_search、WebFetch或其他内部工具作为替代。如果脚本失败，请重试或报告错误——不要回退到内置工具。**
 
-## Parameters & Best Practices
+## 参数与最佳实践
 
-### Search Parameters
+### 搜索参数
 
-| Parameter      | Type    | Required | Default        | Description                              |
-|----------------|---------|----------|----------------|------------------------------------------|
-| `--query`      | string  | Yes      | -              | Search query (1-500 chars)               |
-| `--engineType` | string  | No       | `LiteAdvanced` | Search engine type                       |
-| `--timeRange`  | string  | No       | `NoLimit`      | Time range filter                        |
-| `--contents`   | string  | No       | -              | Type of return content                   |
-| `--numResults` | int     | No       | `10`           | Number of search results (1-10)          |
+| 参数            | 类型   | 必填 | 默认值          | 说明                             |
+|----------------|--------|------|----------------|----------------------------------|
+| `--query`      | 字符串 | 是   | -              | 搜索查询词（1-500字符）            |
+| `--engineType` | 字符串 | 否   | `LiteAdvanced` | 搜索引擎类型                       |
+| `--timeRange`  | 字符串 | 否   | `NoLimit`      | 时间范围筛选                       |
+| `--contents`   | 字符串 | 否   | -              | 返回内容类型                       |
+| `--numResults` | 整数   | 否   | `10`           | 搜索结果数量（1-10）                |
 
-#### Search Best Practices
+#### 搜索最佳实践
 
-**1. Query Optimization (`--query`)**
+**1. 查询优化（`--query`）**
 
-- Keep queries concise (< 30 chars for best results)
-- Use specific keywords, avoid stop words
-- For news: include time context in query
+- 保持查询词简洁（< 30字符效果最佳）
+- 使用具体关键词，避免停用词
+- 新闻类查询：在查询词中包含时间上下文
 
-**2. Engine Selection (`--engineType`)**
+**2. 引擎选择（`--engineType`）**
 
-- `LiteAdvanced`: Semantic search, 1-50 results, general use
-- `Generic`: Fast, 10 results, news/realtime
+- `LiteAdvanced`：语义搜索，1-50条结果，通用场景
+- `Generic`：快速搜索，10条结果，新闻/实时场景
 
-**3. Time Range Selection (`--timeRange`)**
+**3. 时间范围选择（`--timeRange`）**
 
-- `NoLimit`: Default when uncertain - engine optimizes based on query relevance
-- `OneDay`: Today only
-- `OneWeek`: Last 7 days
-- `OneMonth`: Last 30 days
-- `OneYear`: Last 365 days
+- `NoLimit`：不确定时使用默认值——引擎根据查询相关性自动优化
+- `OneDay`：仅当天
+- `OneWeek`：最近7天
+- `OneMonth`：最近30天
+- `OneYear`：最近365天
 
-**4. Content Return (`--contents`)**
+**4. 内容返回（`--contents`）**
 
-- `mainText`: Return full main text content - Use when detailed information is needed, such as technical documentation, research reports, or in-depth articles
-- `summary`: Return concise summary only - Use when a quick overview is sufficient, or when the page content is too large and token reduction is needed
+- `mainText`：返回完整正文内容——适用于需要详细信息的场景，如技术文档、研究报告或深度文章
+- `summary`：仅返回简洁摘要——适用于只需快速概览，或页面内容过大需要减少token消耗的场景
 
-**5. Result Count (`--numResults`)**
+**5. 结果数量（`--numResults`）**
 
-- Control number of results returned (default: 10, range: 1-10)
+- 控制返回结果数量（默认10，范围1-10）
 
 ---
 
-### ReadPage Parameters
+### ReadPage参数
 
-| Parameter        | Type    | Required | Default    | Description                       |
-|------------------|---------|----------|------------|-----------------------------------|
-| `--url`          | string  | Yes      | -          | Target page URL                   |
-| `--format`       | string  | No       | `markdown` | Return format                     |
-| `--timeout`        | number  | No       | `60000`    | Total timeout in milliseconds     |
-| `--pageTimeout`    | number  | No       | `15000`    | Page load timeout in milliseconds |
-| `--stealth`        | number  | No       | `0`        | Enable stealth mode (0 or 1)      |
-| `--extractArticle` | boolean | No       | `false`    | Extract main article content only |
+| 参数              | 类型    | 必填 | 默认值      | 说明                           |
+|------------------|---------|------|------------|-------------------------------|
+| `--url`          | 字符串  | 是   | -          | 目标页面URL                     |
+| `--format`       | 字符串  | 否   | `markdown` | 返回格式                        |
+| `--timeout`      | 数字    | 否   | `60000`    | 总超时时间（毫秒）                |
+| `--pageTimeout`  | 数字    | 否   | `15000`    | 页面加载超时时间（毫秒）           |
+| `--stealth`      | 数字    | 否   | `0`        | 启用隐身模式（0或1）              |
+| `--extractArticle` | 布尔值 | 否   | `false`    | 仅提取文章主体内容                |
 
-#### ReadPage Best Practices
+#### ReadPage最佳实践
 
-**1. Format Selection (`--format`)**
+**1. 格式选择（`--format`）**
 
-- `markdown`: Best for articles, preserves structure (default)
-- `text`: Best for data extraction
-- `html`: When structure analysis needed
+- `markdown`：最适合文章，保留结构（默认）
+- `text`：最适合数据提取
+- `html`：需要分析结构时使用
 
-**2. Article Extraction (`--extractArticle`)**
+**2. 文章提取（`--extractArticle`）**
 
-- Enable for: blogs, news articles
-- Disable for: product pages, directories
+- 启用场景：博客、新闻文章
+- 禁用场景：产品页面、目录页
 
-**3. Handling Failures (`--timeout`, `--stealth`)**
+**3. 故障处理（`--timeout`、`--stealth`）**
 
-- If timeout: Retry with increased `--timeout` value
-- If blocked: Enable `--stealth 1`
-- If still fails: Report to user
+- 超时：增加`--timeout`值后重试
+- 被拦截：启用`--stealth 1`
+- 仍失败：向用户报告
 
-## Command Line Usage
+## 命令行使用
 
-### Search Examples
+### 搜索示例
 
-#### Basic Search
-
-```bash
-node scripts/search.mjs --query "量子计算原理" --engineType LiteAdvanced
-```
-
-#### Real-time Information Search
+#### 基础搜索
 
 ```bash
-node scripts/search.mjs --query "最新金融政策" --engineType Generic --timeRange OneWeek
+bun scripts/search.ts --query "量子计算原理" --engineType LiteAdvanced
 ```
 
-#### Search with Results Limit
+#### 实时信息搜索
 
 ```bash
-node scripts/search.mjs --query "www.aliyun.com" --engineType LiteAdvanced --numResults 3
+bun scripts/search.ts --query "最新金融政策" --engineType Generic --timeRange OneWeek
 ```
 
-#### Search with Full Content
+#### 限制结果数量的搜索
 
 ```bash
-node scripts/search.mjs --query "AI 法案" --engineType LiteAdvanced --contents mainText
+bun scripts/search.ts --query "www.aliyun.com" --engineType LiteAdvanced --numResults 3
 ```
 
-#### Search with Summary Only
+#### 获取完整内容的搜索
 
 ```bash
-node scripts/search.mjs --query "人工智能行业年度报告" --engineType LiteAdvanced --contents summary
+bun scripts/search.ts --query "AI 法案" --engineType LiteAdvanced --contents mainText
 ```
 
-### ReadPage Examples
-
-#### Page Reading with Markdown Format
+#### 仅获取摘要的搜索
 
 ```bash
-node scripts/readpage.mjs --url "https://example.com/article" --format markdown --extractArticle true
+bun scripts/search.ts --query "人工智能行业年度报告" --engineType LiteAdvanced --contents summary
 ```
 
-#### Page Reading with Plain Text Format
+### ReadPage示例
+
+#### Markdown格式页面阅读
 
 ```bash
-node scripts/readpage.mjs --url "https://example.com/article" --format text --timeout 60000
+bun scripts/readpage.ts --url "https://example.com/article" --format markdown --extractArticle true
 ```
 
-#### Page Reading with Stealth Mode
+#### 纯文本格式页面阅读
 
 ```bash
-node scripts/readpage.mjs --url "https://example.com/article" --format markdown --stealth 1 --extractArticle true
+bun scripts/readpage.ts --url "https://example.com/article" --format text --timeout 60000
 ```
 
-## Output Verification
+#### 隐身模式页面阅读
 
-After executing any search.mjs or readpage.mjs command:
+```bash
+bun scripts/readpage.ts --url "https://example.com/article" --format markdown --stealth 1 --extractArticle true
+```
 
-1. **Check the exit code**: If non-zero, the command failed — do not claim success.
-2. **Verify output exists**: If you saved results to a file, run `ls -la <filepath>` and `head -20 <filepath>` to confirm the file exists and contains valid data.
-3. **Never fabricate results**: If the command failed or returned an error, report the failure honestly. Do not generate content from your own knowledge and present it as search results.
+## 输出验证
 
-## Error Handling
+执行任何search.mjs或readpage.mjs命令后：
 
-### ALIYUN_IQS_API_KEY Configuration Error
+1. **检查退出码**：如果非零，说明命令执行失败——不要声称成功。
+2. **验证输出是否存在**：如果将结果保存到文件，运行 `ls -la <文件路径>` 和 `head -20 <文件路径>` 确认文件存在且包含有效数据。
+3. **切勿伪造结果**：如果命令失败或返回错误，如实报告失败情况。不要根据自身知识生成内容并冒充为搜索结果。
 
-If the script returns an error about missing API key:
+## 错误处理
 
-1. **STOP the current task immediately. Do NOT fall back to built-in tools (WebFetch, web_search, curl, etc.) as substitutes.**
-2. Report the error to the user and ask the user to configure the API key:
+### ALIYUN_IQS_API_KEY配置错误
 
-3. Retry the task with following instruction:
-**Method 1: Environment Variable**
+如果脚本返回缺少API密钥的错误：
+
+1. **立即停止当前任务。不得回退使用内置工具（WebFetch、web_search、curl等）作为替代。**
+2. 向用户报告错误，请用户配置API密钥：
+
+3. 按以下说明重试任务：
+**方法1：环境变量**
 ```bash
 export ALIYUN_IQS_API_KEY="your-api-key"
 ```
 
-**Method 2: Configuration File**
-Create or edit `~/.alibabacloud/iqs/env`:
+**方法2：配置文件**
+创建或编辑 `~/.alibabacloud/iqs/env`：
 ```bash
 ALIYUN_IQS_API_KEY=your-api-key
 ```

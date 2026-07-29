@@ -12,3 +12,4 @@ runtime/
 .qoder/*
 !.qoder/AGENTS.md
 rules/admin.md
+.DS_Store

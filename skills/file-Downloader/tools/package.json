@@ -1,0 +1,13 @@
+{
+  "name": "file-downloader",
+  "version": "1.0.0",
+  "description": "Download PDFs or generate offline PDF/Markdown from webpages",
+  "type": "module",
+  "scripts": {
+    "download": "bun download-pdf.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "pdfmake": "^0.2.18"
+  }
+}
