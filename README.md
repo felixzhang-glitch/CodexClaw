@@ -31,6 +31,7 @@ codeClaw 不是智能体框架，是一层刻意做薄的 harness：
 
 **会话与任务**
 - opencode 走原生会话续接，上下文与压缩由 opencode 自管；备选后端按轮数拼接历史
+- 长期记忆 `memory/`：仅用户明确要求时写入并回执，分类 markdown 存放，常驻注入每轮在场，本地 git 快照可审查回滚（详见 [docs/memory.md](docs/memory.md)）
 - 消息去重（TTL 1 小时）+ per-session FIFO 消息队列
 - 定时提醒 `/remind`、每日定时简报 `/daily`（飞书 + 微信推送）
 - 长任务 Typing 回执 + `/stop` 强制终止

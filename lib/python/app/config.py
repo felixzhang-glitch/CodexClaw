@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     )
     memory_max_inject_chars: int = Field(default=4000, validation_alias="MEMORY_MAX_INJECT_CHARS")
     memory_git_auto_commit: bool = Field(default=True, validation_alias="MEMORY_GIT_AUTO_COMMIT")
+    memory_git_dir: str = Field(
+        default="./runtime/memory-git",
+        validation_alias="MEMORY_GIT_DIR",
+    )
     memory_context_path: str = Field(
         default="./runtime/server/memory-context.md",
         validation_alias="MEMORY_CONTEXT_PATH",

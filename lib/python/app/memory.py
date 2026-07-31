@@ -12,7 +12,10 @@ It does two things:
    be resident because the opencode preamble is only sent on a session's first
    turn, so a first-turn-only injection would stop working from turn two.
 2. Keeps `MEMORY_DIR` under a local-only git repo (no remote) so a mistaken
-   agent write stays reviewable and revertible.
+   agent write stays reviewable and revertible. The git dir lives outside the
+   worktree (`MEMORY_GIT_DIR`, under runtime/): an embedded `memory/.git`
+   would make git treat memory/ as a nested-repo boundary and silently refuse
+   to track `memory/README.md` in the main repo.
 """
 
 from __future__ import annotations
@@ -88,6 +91,10 @@ def _settings_or_default(settings: Settings | None) -> Settings:
 
 def memory_dir(settings: Settings | None = None) -> str:
     return _resolve(_settings_or_default(settings).memory_dir)
+
+
+def _git_dir(settings: Settings) -> str:
+    return _resolve(settings.memory_git_dir)
 
 
 def category_path(category: str, settings: Settings | None = None) -> str:
@@ -287,9 +294,9 @@ def write_context_file(settings: Settings | None = None) -> str | None:
     return target
 
 
-def _run_git(directory: str, *args: str) -> subprocess.CompletedProcess[str]:
+def _run_git(directory: str, git_dir: str, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", directory, *args],
+        ["git", "--git-dir", git_dir, "--work-tree", directory, *args],
         capture_output=True,
         text=True,
         timeout=_GIT_TIMEOUT_SECONDS,
@@ -306,18 +313,19 @@ def auto_commit(settings: Settings | None = None) -> None:
         return
 
     directory = memory_dir(settings)
-    if not os.path.isdir(os.path.join(directory, ".git")):
+    git_dir = _git_dir(settings)
+    if not os.path.isdir(git_dir):
         return
 
     try:
-        status = _run_git(directory, "status", "--porcelain")
+        status = _run_git(directory, git_dir, "status", "--porcelain")
         if status.returncode != 0 or not status.stdout.strip():
             return
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        added = _run_git(directory, "add", "-A")
+        added = _run_git(directory, git_dir, "add", "-A")
         if added.returncode != 0:
             raise RuntimeError(added.stderr.strip())
-        committed = _run_git(directory, "commit", "-m", f"memory: auto snapshot {stamp}")
+        committed = _run_git(directory, git_dir, "commit", "-m", f"memory: auto snapshot {stamp}")
         if committed.returncode != 0:
             raise RuntimeError(committed.stderr.strip() or committed.stdout.strip())
         logger.info(
@@ -334,18 +342,50 @@ def auto_commit(settings: Settings | None = None) -> None:
 def _ensure_git_repo(directory: str, settings: Settings) -> None:
     if not settings.memory_git_auto_commit:
         return
-    if os.path.isdir(os.path.join(directory, ".git")):
+    git_dir = _git_dir(settings)
+
+    # Migrate a legacy embedded repo: memory/.git makes the main repo treat
+    # memory/ as a nested-repo boundary and refuse to track memory/README.md.
+    legacy = os.path.join(directory, ".git")
+    if os.path.isdir(legacy) and not os.path.isdir(git_dir):
+        try:
+            os.makedirs(os.path.dirname(git_dir), exist_ok=True)
+            os.rename(legacy, git_dir)
+            logger.info(
+                "migrated embedded memory git dir out of the worktree",
+                extra={"event": "memory.git_migrate", "path": git_dir},
+            )
+        except OSError as exc:
+            logger.warning(
+                "failed to migrate embedded memory git dir",
+                extra={"event": "memory.git_migrate", "error": str(exc)},
+            )
+            return
+
+    if os.path.isdir(git_dir):
         auto_commit(settings)
         return
 
     try:
-        initialized = _run_git(directory, "init")
+        os.makedirs(os.path.dirname(git_dir), exist_ok=True)
+        initialized = subprocess.run(
+            ["git", "init", "--separate-git-dir", git_dir, directory],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
         if initialized.returncode != 0:
             raise RuntimeError(initialized.stderr.strip())
+        # `--separate-git-dir` leaves a .git pointer file in the worktree,
+        # which still marks a nested-repo boundary for the main repo -- drop it
+        # and rely on explicit --git-dir/--work-tree invocations instead.
+        pointer = os.path.join(directory, ".git")
+        if os.path.isfile(pointer):
+            os.remove(pointer)
         # Deliberately no remote: memory must never be pushable.
         logger.info(
             "initialized local-only memory git repo",
-            extra={"event": "memory.git_init", "path": directory},
+            extra={"event": "memory.git_init", "path": git_dir},
         )
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
         logger.warning(

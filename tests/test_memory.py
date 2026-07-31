@@ -16,6 +16,7 @@ def _make_settings(tmp_path, **overrides):
         memory_always_inject=always,
         memory_max_inject_chars=4000,
         memory_git_auto_commit=False,
+        memory_git_dir=str(tmp_path / "memory-git"),
         memory_context_path=str(tmp_path / "runtime" / "memory-context.md"),
         memory_category_list=[c.strip() for c in categories.split(",") if c.strip()],
         memory_always_inject_list=[c.strip() for c in always.split(",") if c.strip()],
@@ -161,41 +162,62 @@ def test_auto_commit_snapshots_changes(tmp_path) -> None:
     settings = _make_settings(tmp_path, memory_git_auto_commit=True)
     memory.ensure_workspace(settings)
     directory = memory.memory_dir(settings)
+    git_dir = settings.memory_git_dir
 
-    assert os.path.isdir(os.path.join(directory, ".git"))
+    assert os.path.isdir(git_dir)
+    # No .git entry may remain inside the worktree: it would mark a nested-repo
+    # boundary and block the main repo from tracking memory/README.md.
+    assert not os.path.exists(os.path.join(directory, ".git"))
     # Memory must never be pushable.
     remotes = subprocess.run(
-        ["git", "-C", directory, "remote"], capture_output=True, text=True, check=True
+        ["git", "--git-dir", git_dir, "remote"], capture_output=True, text=True, check=True
     )
     assert remotes.stdout.strip() == ""
 
-    before = subprocess.run(
-        ["git", "-C", directory, "rev-list", "--count", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    def _count() -> int:
+        result = subprocess.run(
+            ["git", "--git-dir", git_dir, "rev-list", "--count", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return int(result.stdout.strip())
+
+    before = _count()
 
     _write(settings, "basic", "# 基础档案\n\n- [2026-07-30] 体重 75kg\n")
     memory.auto_commit(settings)
 
-    after = subprocess.run(
-        ["git", "-C", directory, "rev-list", "--count", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    assert int(after) == int(before) + 1
+    after = _count()
+    assert after == before + 1
 
     # A clean tree produces no empty commit.
     memory.auto_commit(settings)
-    latest = subprocess.run(
-        ["git", "-C", directory, "rev-list", "--count", "HEAD"],
+    assert _count() == after
+
+
+def test_ensure_workspace_migrates_legacy_embedded_git(tmp_path) -> None:
+    settings = _make_settings(tmp_path, memory_git_auto_commit=True)
+    directory = memory.memory_dir(settings)
+    os.makedirs(directory, exist_ok=True)
+    _write(settings, "basic", "# 基础档案\n\n- [2026-07-30] 迁移前条目\n")
+    subprocess.run(["git", "-C", directory, "init"], capture_output=True, check=True)
+    subprocess.run(["git", "-C", directory, "add", "-A"], capture_output=True, check=True)
+    subprocess.run(
+        ["git", "-C", directory, "commit", "-m", "legacy"], capture_output=True, check=True
+    )
+
+    memory.ensure_workspace(settings)
+
+    # The embedded repo moved out of the worktree with history intact.
+    assert not os.path.exists(os.path.join(directory, ".git"))
+    log = subprocess.run(
+        ["git", "--git-dir", settings.memory_git_dir, "log", "--oneline"],
         capture_output=True,
         text=True,
         check=True,
-    ).stdout.strip()
-    assert latest == after
+    )
+    assert "legacy" in log.stdout
 
 
 def test_auto_commit_degrades_silently_without_git(tmp_path) -> None:
@@ -215,7 +237,7 @@ def test_auto_commit_skipped_when_disabled(tmp_path) -> None:
     settings = _make_settings(tmp_path, memory_git_auto_commit=False)
     memory.ensure_workspace(settings)
 
-    assert not os.path.isdir(os.path.join(memory.memory_dir(settings), ".git"))
+    assert not os.path.isdir(settings.memory_git_dir)
     with patch("app.memory._run_git") as run_git:
         memory.auto_commit(settings)
     run_git.assert_not_called()

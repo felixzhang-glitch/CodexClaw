@@ -64,14 +64,17 @@ Python 侧不参与写入，只负责渲染注入块和维护 git 快照。
 
 ## 人工审查与增删改查
 
-记忆是纯 markdown，直接编辑就是最权威的手段：
+记忆是纯 markdown，直接编辑就是最权威的手段。快照仓的 git dir 在 `runtime/memory-git`（工作区内不能有
+`.git`，否则主仓会把 `memory/` 当嵌套仓边界，拒绝跟踪 `memory/README.md`），建议先定义别名：
 
 ```bash
-vim memory/health.md              # 改
-git -C memory log --oneline       # 看变更历史
-git -C memory diff HEAD~1         # 看上一次改了什么
-git -C memory checkout -- .       # 回滚未提交的误写
-git -C memory revert <commit>     # 回滚某次快照
+alias mgit='git --git-dir=runtime/memory-git --work-tree=memory'
+
+vim memory/health.md    # 改
+mgit log --oneline      # 看变更历史
+mgit diff HEAD~1        # 看上一次改了什么
+mgit checkout -- .      # 回滚未提交的误写
+mgit revert <commit>    # 回滚某次快照
 ```
 
 也可以用自然语言让 codeClaw 代劳（"看下你记了我什么"、"把体重那条删了"）。
@@ -79,9 +82,9 @@ git -C memory revert <commit>     # 回滚某次快照
 
 ## 保密与不可推送
 
-- `.gitignore` 已排除 `memory/`，主仓不会跟踪任何记忆内容
-- `memory/` 自身是**独立本地 git 仓且不配置 remote**，`git push` 没有目标，物理上无法推送 github
-- `runtime/` 整体 gitignore，渲染产物 `memory-context.md` 不入库
+- `.gitignore` 以 `/memory/*` + `!/memory/README.md` 排除记忆内容，仅目录占位 README 入库
+- 快照仓 git dir 在 `runtime/memory-git` 且**不配置 remote**，`git push` 没有目标，物理上无法推送 github
+- `runtime/` 整体 gitignore，快照仓与渲染产物 `memory-context.md` 都不入库
 
 ## 快照时机
 
@@ -93,7 +96,8 @@ git 不可用、身份未配置等任何失败都只记 warning，绝不影响�
 ## 文件
 
 ```
-memory/                        → 记忆内容（gitignore，独立本地 git 仓）
+memory/                        → 记忆内容（仅 README 入库，其余 gitignore）
+runtime/memory-git/            → 快照仓 git dir（无 remote，不入库）
 lib/python/app/memory.py       → 渲染注入块 + git 快照维护
 skills/memory/SKILL.md         → agent 的完整操作规范
 runtime/server/memory-context.md → 渲染产物，供 opencode instructions 读取

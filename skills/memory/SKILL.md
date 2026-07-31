@@ -110,5 +110,5 @@ codeClaw 的长期记忆。记忆内容保存在项目根 `memory/` 目录，每
   记忆只能写 `memory/` 下的类别文件。
 - 禁止新建 `MEMORY_CATEGORIES` 之外的记忆文件。
 - 每次写入后必须回执，让用户能当场发现记错。
-- `memory/` 是独立本地 git 仓（无 remote），每轮对话会自动快照，
+- `memory/` 受本地快照仓保护（git dir 在 `runtime/memory-git`，无 remote），每轮对话会自动快照，
   所以不需要你手动备份；但也因此不要往里放临时文件。
