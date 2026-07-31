@@ -6,6 +6,16 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _split_csv(raw: str) -> list[str]:
+    """Parse a comma-separated config value into a deduplicated ordered list."""
+    items: list[str] = []
+    for chunk in (raw or "").split(","):
+        value = chunk.strip()
+        if value and value not in items:
+            items.append(value)
+    return items
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file="conf/.env",
@@ -82,9 +92,36 @@ class Settings(BaseSettings):
         validation_alias="DAILY_TASK_STORE_PATH",
     )
 
+    memory_enabled: bool = Field(default=True, validation_alias="MEMORY_ENABLED")
+    memory_dir: str = Field(default="./memory", validation_alias="MEMORY_DIR")
+    memory_categories: str = Field(
+        default="basic,health,preference,work,finance,recent",
+        validation_alias="MEMORY_CATEGORIES",
+    )
+    memory_always_inject: str = Field(
+        default="basic,health,recent",
+        validation_alias="MEMORY_ALWAYS_INJECT",
+    )
+    memory_max_inject_chars: int = Field(default=4000, validation_alias="MEMORY_MAX_INJECT_CHARS")
+    memory_git_auto_commit: bool = Field(default=True, validation_alias="MEMORY_GIT_AUTO_COMMIT")
+    memory_context_path: str = Field(
+        default="./runtime/server/memory-context.md",
+        validation_alias="MEMORY_CONTEXT_PATH",
+    )
+
     server_host: str = Field(default="0.0.0.0", validation_alias="SERVER_HOST")
     server_port: int = Field(default=8080, validation_alias="SERVER_PORT")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+
+    @property
+    def memory_category_list(self) -> list[str]:
+        """Categories the agent is allowed to write, in declared order."""
+        return _split_csv(self.memory_categories)
+
+    @property
+    def memory_always_inject_list(self) -> list[str]:
+        """Categories injected into every turn's context."""
+        return _split_csv(self.memory_always_inject)
 
     @property
     def codex_chat_completions_url(self) -> str:

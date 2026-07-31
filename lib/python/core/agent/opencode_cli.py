@@ -11,6 +11,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+from app import memory
 from app.config import Settings
 from core.agent.claude_cli import ClaudeCliClient
 from core.codex.client import CodexClientCancelled, CodexClientError
@@ -416,10 +417,24 @@ class OpenCodeCliClient:
         ]
         if instructions:
             config["instructions"] = instructions
+        memory_path = self._memory_context_path()
+        if memory_path:
+            config.setdefault("instructions", []).append(memory_path)
         hook_plugin = os.path.join(_PROJECT_ROOT, "hooks", "inject-time.js")
         if os.path.isfile(hook_plugin):
             config["plugin"] = [f"file://{hook_plugin}"]
         return config
+
+    @staticmethod
+    def _memory_context_path() -> str | None:
+        # Long-term memory has to ride the `instructions` channel rather than the
+        # preamble: the preamble is only sent on a session's first turn, and the
+        # write protocol must be present on every turn.
+        try:
+            return memory.write_context_file()
+        except Exception:  # noqa: BLE001 - memory must never break a turn
+            logger.warning("failed to build memory context", extra={"event": "memory.context_build"})
+            return None
 
     async def _readline_with_idle_timeout(self, stream: asyncio.StreamReader | None) -> bytes:
         if stream is None:

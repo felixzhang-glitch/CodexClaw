@@ -1,0 +1,100 @@
+# 长期记忆
+
+## 三层记忆载体
+
+codeClaw 的"记忆"分三层，职责与可写方严格分离：
+
+| 载体 | 内容 | 谁可写 | 注入方式 |
+|------|------|--------|----------|
+| `rules/AGENTS.md` | 人格、风格、时间感知、工具偏好 | 仅人工 | opencode `instructions` |
+| `rules/admin.md` | 权威静态事实（身份、权限、邮箱、微信 user_id、运行环境） | 仅人工 | opencode `instructions` |
+| `memory/*.md` | 动态事实（基础档案、健康、偏好、工作、投资、近况） | agent（用户明确要求时）+ 人工 | 生成的记忆块，常驻注入 |
+
+分层的意义：agent 只能写 `memory/`，改不到人格与权威设定；会变的事实只存在 `memory/` 一处，
+不会出现 `admin.md` 与 `memory/health.md` 各存一份体重、数值互相矛盾的情况。
+
+## 写入触发
+
+只有用户明确表达记忆意图时才写入，例如"记住/记一下/存下来/以后都/别忘了"。
+日常对话中顺带提到的事实不会被记录。
+
+写入由 agent 自己执行（读文件、判断新增还是更新、写回），完整规范见 `skills/memory/SKILL.md`。
+Python 侧不参与写入，只负责渲染注入块和维护 git 快照。
+
+写入后 agent 必须回执 `已记入 memory/<类别>.md：<条目原文>`，这是纯自然语言触发的必要补偿——
+让你当场就能发现记错或记漏。
+
+## 注入机制
+
+关键约束：opencode 的 preamble 只在会话首轮发送（`include_preamble=session_id is None`），
+所以写入协议**必须走常驻通道**，否则第二轮起 agent 就不知道该写记忆了。
+
+因此 `app/memory.py` 把「写入协议 + 常驻类别全文 + 非常驻类别索引」渲染成单个文件
+`runtime/server/memory-context.md`，两条注入路径共用同一份内容：
+
+- **opencode 后端**：文件路径追加进 `instructions`（`opencode_cli.py::_build_config_content`）。
+  每轮对话都会 spawn 新进程重建 config，所以记忆改完下一轮即生效。
+- **claude / qodercli 后端**：`app/rules.py::load_system_rules()` 末尾追加记忆块。
+- **codex 后端**：本就没有 rules 注入，不涉及。
+
+定时任务（每日简报）自动获益：`daily:<id>:<日期>` 每天是新 session，但常驻记忆随
+`instructions` 注入，所以简报 agent 具备跨天的事实基础。
+
+## 配置
+
+`conf/.env`：
+
+| 配置项 | 作用 |
+|--------|------|
+| `MEMORY_ENABLED` | 总开关，`false` 时完全不注入 |
+| `MEMORY_DIR` | 记忆目录，相对路径按项目根解析（不受 CWD 影响） |
+| `MEMORY_CATEGORIES` | 分类 schema，agent 只允许写这些类别，禁止新建文件 |
+| `MEMORY_ALWAYS_INJECT` | 常驻注入白名单，须为 `MEMORY_CATEGORIES` 子集（非子集时取交集并告警） |
+| `MEMORY_MAX_INJECT_CHARS` | 记忆内容的体积上限，超出按类别边界截断（不包含固定的写入协议） |
+| `MEMORY_GIT_AUTO_COMMIT` | 是否自动快照 |
+| `MEMORY_CONTEXT_PATH` | 渲染产物路径（在 `runtime/` 下，天然不入库） |
+
+常驻类别每轮都消耗上下文预算，所以只把真正需要"始终在场"的类别放进 `MEMORY_ALWAYS_INJECT`，
+其余类别只在注入块里列出路径，由 agent 按需读取。
+
+`MEMORY_MAX_INJECT_CHARS` 只约束记忆内容，不约束写入协议。协议是固定开销（约 700 字）且始终完整注入：
+被截半的规则集比没有规则更危险（可能正好切掉"禁止修改 admin.md"这类约束）。
+
+新增类别：在 `MEMORY_CATEGORIES` 加名字（限 `[a-z0-9_-]`），重启后自动创建骨架文件。
+
+## 人工审查与增删改查
+
+记忆是纯 markdown，直接编辑就是最权威的手段：
+
+```bash
+vim memory/health.md              # 改
+git -C memory log --oneline       # 看变更历史
+git -C memory diff HEAD~1         # 看上一次改了什么
+git -C memory checkout -- .       # 回滚未提交的误写
+git -C memory revert <commit>     # 回滚某次快照
+```
+
+也可以用自然语言让 codeClaw 代劳（"看下你记了我什么"、"把体重那条删了"）。
+删除走软删除：条目移入文件末尾的 `## 已归档` 小节，不物理删除。
+
+## 保密与不可推送
+
+- `.gitignore` 已排除 `memory/`，主仓不会跟踪任何记忆内容
+- `memory/` 自身是**独立本地 git 仓且不配置 remote**，`git push` 没有目标，物理上无法推送 github
+- `runtime/` 整体 gitignore，渲染产物 `memory-context.md` 不入库
+
+## 快照时机
+
+`auto_commit()` 在每轮渲染注入块前调用，捕获上一轮 agent 的写入；服务 shutdown 时再快照一次。
+git 不可用、身份未配置等任何失败都只记 warning，绝不影响对话。
+
+代价是快照会滞后一轮（本轮写入在下一轮才提交），作为防误写的兜底手段可以接受。
+
+## 文件
+
+```
+memory/                        → 记忆内容（gitignore，独立本地 git 仓）
+lib/python/app/memory.py       → 渲染注入块 + git 快照维护
+skills/memory/SKILL.md         → agent 的完整操作规范
+runtime/server/memory-context.md → 渲染产物，供 opencode instructions 读取
+```

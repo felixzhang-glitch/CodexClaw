@@ -7,6 +7,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app import memory
 from app.config import get_settings
 from app.logging import setup_logging
 from channel.feishu.client import FeishuClient, FeishuClientError
@@ -144,6 +145,7 @@ async def wechat_webhook(request: Request) -> JSONResponse:
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    memory.ensure_workspace(settings)
     await reminder_scheduler.start()
     await daily_scheduler.start()
     loop = asyncio.get_running_loop()
@@ -160,6 +162,7 @@ async def startup_event() -> None:
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    memory.auto_commit(settings)
     await daily_scheduler.close()
     await reminder_scheduler.close()
     await feishu_client.close()
