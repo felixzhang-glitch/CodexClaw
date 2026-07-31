@@ -87,15 +87,28 @@ async function search(options) {
     }
   }
 
+  // 天气等垂类场景需要 locationInfo，且仅 engineType=Generic 时 sceneItems 才会返回（参考阿里云文档 2883041），
+  // 故提供 --city/--ip 且未显式指定 engineType 时默认切换为 Generic
+  const hasLocation = Boolean(options.city || options.ip);
   const body = {
     query: options.query,
-    engineType: options.engineType || 'LiteAdvanced',
+    engineType: options.engineType || (hasLocation ? 'Generic' : 'LiteAdvanced'),
     timeRange: options.timeRange || 'NoLimit',
     contents: {
       mainText: options.contents !== 'summary',  // 默认为 true，除非显式指定为 'summary'
       summary: options.contents == 'summary'
     }
   };
+
+  if (hasLocation) {
+    body.locationInfo = {};
+    if (options.city) {
+      body.locationInfo.city = options.city;
+    }
+    if (options.ip) {
+      body.locationInfo.ip = options.ip;
+    }
+  }
 
   if (options.category) {
     body.category = options.category;
@@ -141,6 +154,13 @@ async function search(options) {
       formattedResults = formattedResults.slice(0, limit);
     }
 
+    // 垂类场景结果（天气/时间等）比网页召回更准确，有召回时优先输出；
+    // 无 sceneItems 时保持纯数组输出，避免破坏既有用法
+    const sceneItems = formatSceneItems(data.sceneItems || []);
+    if (sceneItems.length > 0) {
+      return { sceneItems, pageItems: formattedResults };
+    }
+
     return formattedResults;
   } catch (error) {
     clearTimeout(timeoutId);
@@ -178,6 +198,25 @@ function formatResults(items) {
     }
 
     return formattedItem;
+  });
+}
+
+/**
+ * Format scene items (structured vertical results, e.g. weather/time)
+ * @param {Array} items - Raw scene items
+ * @returns {Array} Scene items with detail parsed as JSON when possible
+ */
+function formatSceneItems(items) {
+  return items.map(item => {
+    let detail = item.detail;
+    if (typeof detail === 'string') {
+      try {
+        detail = JSON.parse(detail);
+      } catch {
+        // detail 不是合法 JSON 时保留原始字符串
+      }
+    }
+    return { type: item.type, detail };
   });
 }
 
