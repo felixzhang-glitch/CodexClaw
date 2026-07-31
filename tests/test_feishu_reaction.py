@@ -142,10 +142,9 @@ async def test_send_markdown_payload_to_chat_id() -> None:
     assert calls["send_body"]["msg_type"] == "interactive"
     assert calls["send_body"]["uuid"] == "u1"
     card = json.loads(calls["send_body"]["content"])
-    assert card["config"] == {"wide_screen_mode": True}
-    assert card["elements"][0]["tag"] == "div"
-    assert card["elements"][0]["text"] == {
-        "tag": "lark_md",
+    assert card["schema"] == "2.0"
+    assert card["body"]["elements"][0] == {
+        "tag": "markdown",
         "content": "**提醒内容**\n\n```python\nprint('ok')\n```",
     }
 
@@ -187,7 +186,8 @@ async def test_reply_markdown_payload() -> None:
     assert calls["reply_body"]["msg_type"] == "interactive"
     assert calls["reply_body"]["uuid"] == "u1"
     card = json.loads(calls["reply_body"]["content"])
-    assert card["elements"][0]["text"] == {"tag": "lark_md", "content": "# 标题"}
+    assert card["schema"] == "2.0"
+    assert card["body"]["elements"][0] == {"tag": "markdown", "content": "# 标题"}
 
 
 @pytest.mark.asyncio

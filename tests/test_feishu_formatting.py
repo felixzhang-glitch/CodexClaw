@@ -18,18 +18,18 @@ def test_split_message_text_preserves_small_code_block() -> None:
     assert chunks == [text]
 
 
-def test_build_markdown_card_uses_lark_markdown_text() -> None:
+def test_build_markdown_card_uses_card_v2_markdown_element() -> None:
     card = build_markdown_card("**重点**")
 
     assert card == {
-        "config": {"wide_screen_mode": True},
-        "elements": [
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
+        "schema": "2.0",
+        "config": {"width_mode": "fill"},
+        "body": {
+            "elements": [
+                {
+                    "tag": "markdown",
                     "content": "**重点**",
                 },
-            }
-        ],
+            ],
+        },
     }

@@ -15,16 +15,16 @@ def normalize_reply_text(text: str) -> str:
 
 def build_markdown_card(markdown: str) -> dict[str, Any]:
     return {
-        "config": {"wide_screen_mode": True},
-        "elements": [
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
+        "schema": "2.0",
+        "config": {"width_mode": "fill"},
+        "body": {
+            "elements": [
+                {
+                    "tag": "markdown",
                     "content": markdown,
                 },
-            }
-        ],
+            ],
+        },
     }
 
 
