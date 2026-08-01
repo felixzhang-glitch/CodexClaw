@@ -80,6 +80,96 @@ def test_extract_session_id_from_event_and_part(tmp_path) -> None:
     assert client._extract_session_id({"type": "text", "part": {"id": "p1"}}) == ""
 
 
+def _text_event(part_id: str, text: str) -> dict:
+    return {"type": "text", "part": {"id": part_id, "messageID": "msg_1", "type": "text", "text": text}}
+
+
+def test_extract_text_delta_emits_each_character_once_per_part(tmp_path) -> None:
+    client = OpenCodeCliClient(settings=_make_settings(tmp_path))
+    emitted: dict[str, int] = {}
+
+    # opencode sends the full accumulated text of a part on every `text` event,
+    # so the delta must be the new suffix only.
+    growth = ["杭", "杭州", "杭州今天", "杭州今天多云"]
+    deltas = [client._extract_text_delta(_text_event("prt_a", text), emitted) for text in growth]
+
+    assert deltas == ["杭", "州", "今天", "多云"]
+    assert "".join(deltas) == growth[-1]
+
+    # A duplicated event must not re-emit text already sent.
+    assert client._extract_text_delta(_text_event("prt_a", "杭州今天多云"), emitted) == ""
+
+    # A single event carrying the whole message is the shape opencode actually
+    # produces today: one text event per assistant message.
+    single = {}
+    assert client._extract_text_delta(_text_event("prt_b", "一次性全量"), single) == "一次性全量"
+
+
+def test_extract_text_delta_tracks_parts_independently(tmp_path) -> None:
+    client = OpenCodeCliClient(settings=_make_settings(tmp_path))
+    emitted: dict[str, int] = {}
+
+    assert client._extract_text_delta(_text_event("prt_a", "AAA"), emitted) == "AAA"
+    # A different part starts from zero instead of inheriting the other's offset.
+    assert client._extract_text_delta(_text_event("prt_b", "BBBBB"), emitted) == "BBBBB"
+    assert client._extract_text_delta(_text_event("prt_a", "AAACCC"), emitted) == "CCC"
+
+    # Missing ids fall back to messageID, then to a shared anonymous counter.
+    anon: dict[str, int] = {}
+    no_id = {"type": "text", "part": {"messageID": "msg_x", "text": "以 messageID 计数"}}
+    assert client._extract_text_delta(no_id, anon) == "以 messageID 计数"
+    assert client._extract_text_delta(no_id, anon) == ""
+
+
+def test_extract_text_delta_assumes_cumulative_text_not_incremental(tmp_path) -> None:
+    """Tripwire for the upstream contract this parser depends on.
+
+    Every `text` event is assumed to carry the full accumulated text. If opencode
+    ever switches to emitting true incremental deltas, the prefix diff below
+    silently drops content instead of concatenating it -- this test documents
+    that failure mode so the breakage surfaces here rather than as truncated
+    replies in production.
+    """
+    client = OpenCodeCliClient(settings=_make_settings(tmp_path))
+    emitted: dict[str, int] = {}
+
+    assert client._extract_text_delta(_text_event("prt_a", "第一段"), emitted) == "第一段"
+    # A non-cumulative follow-up of equal or shorter length is dropped entirely.
+    assert client._extract_text_delta(_text_event("prt_a", "第二段"), emitted) == ""
+    # A longer non-cumulative payload is sliced by length, not by content.
+    assert client._extract_text_delta(_text_event("prt_a", "第三段续写"), emitted) == "续写"
+
+    # Empty and non-string payloads never produce output.
+    assert client._extract_text_delta(_text_event("prt_c", ""), emitted) == ""
+    assert client._extract_text_delta({"type": "text", "part": {"id": "prt_d", "text": None}}, emitted) == ""
+    assert client._extract_text_delta({"type": "step_finish", "part": {"text": "忽略"}}, emitted) == ""
+
+
+def test_extract_text_delta_ignores_reasoning_events(tmp_path) -> None:
+    """Chain-of-thought must never become reply text.
+
+    When a model is registered with `reasoning: true`, opencode sets
+    `enable_thinking` on the DashScope request, the provider returns the
+    chain-of-thought in `reasoning_content`, and it arrives here as a
+    `reasoning` event instead of a `text` one. Registering the model without
+    that capability flag is what previously leaked thinking into replies:
+    the provider had nowhere to put it and folded it into `content`, which is
+    indistinguishable from an answer at this layer.
+    """
+    client = OpenCodeCliClient(settings=_make_settings(tmp_path))
+    emitted: dict[str, int] = {}
+
+    reasoning = {
+        "type": "reasoning",
+        "part": {"id": "prt_r", "messageID": "msg_1", "type": "reasoning", "text": "先分析用户意图，再决定回答结构"},
+    }
+    assert client._extract_text_delta(reasoning, emitted) == ""
+    assert emitted == {}
+
+    # A real answer on the same message is unaffected by the skipped reasoning.
+    assert client._extract_text_delta(_text_event("prt_t", "杭州今天多云"), emitted) == "杭州今天多云"
+
+
 def test_session_persistence_roundtrip_and_reset(tmp_path) -> None:
     settings = _make_settings(tmp_path)
     client = OpenCodeCliClient(settings=settings)
