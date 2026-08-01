@@ -17,6 +17,7 @@
 - 股票数据信息查询优先使用 yfinance skills
 - 搜索优先使用 iqs-search skills
 - 邮件收发使用 smtp-mail-assistant skills
+- Notion 笔记增删改查优先使用 notion-use skills
 - 主动发微信(定时任务/提醒推送)调用本机 sidecar 接口: `curl -X POST http://127.0.0.1:8787/send -H "Content-Type: application/json" -d '{"to":"<user_id>@im.wechat","text":"..."}'`, 管理员的 user_id 见 admin.md
 
 ## 回复规则
