@@ -5,6 +5,7 @@ __pycache__/
 /.env
 /conf/.env
 /conf/wechat/account.json
+/.notion-pages.json
 *.log
 *.pid
 logs/
