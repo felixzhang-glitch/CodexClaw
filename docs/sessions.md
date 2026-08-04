@@ -2,11 +2,22 @@
 
 ## 会话管理
 
+### pi 后端（默认）
+
+pi 走原生会话续接，codeClaw 不拼接历史。与 opencode 的差异在于 **session ID 由 codeClaw 生成**：
+pi 的 `--session-id` 接受任意 ID，不存在就以该 ID 新建，所以不需要从输出里反解。
+
+- 会话 ID 映射：`user_id:chat_id` -> codeClaw 生成的 uuid4 hex
+- 持久化：`runtime/server/pi-sessions.json`
+- pi 侧会话文件：`~/.pi/agent/sessions/` 下按 cwd 分目录的 JSONL 树
+- `/new`、`/reset`：删除映射，下轮自然生成新 uuid（旧会话在 pi 侧保留）
+- 首轮判定：靠“映射是否新建”而不是“session_id 是否为空”，skills 摘要只在首轮注入
+
 ### opencode 后端
 
 opencode 走原生会话续接，codeClaw 不拼接历史：
 
-- 会话 ID 映射：`user_id:chat_id` -> opencode session_id
+- 会话 ID 映射：`user_id:chat_id` -> opencode session_id（从事件流反解）
 - 持久化：`runtime/server/opencode-sessions.json`
 - `/new`：生成新 session_id（旧 session 在 opencode 侧保留）
 - `/reset`：清空映射，下次对话创建新 session

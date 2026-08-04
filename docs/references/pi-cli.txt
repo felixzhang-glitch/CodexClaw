@@ -1,0 +1,223 @@
+# pi CLI 参考
+
+pi（Pi Coding Agent，https://pi.dev）是 codeClaw 的默认后端。本机版本 0.83.0。
+
+## 基本用法
+
+```bash
+# 交互模式
+pi
+
+# 非交互纯文本，处理完即退出
+pi -p "列出 src 下的 ts 文件"
+
+# 非交互 JSONL 事件流（codeClaw 使用；不需要额外加 -p）
+pi --mode json "<prompt>"
+
+# 常驻双向 RPC（codeClaw 暂未使用）
+pi --mode rpc
+
+# 指定模型（provider/model-id，可带 :thinking 后缀）
+pi --model bailian/deepseek-v4-flash-0731 "<prompt>"
+
+# 会话：续接上一个 / 交互式选择 / 指定文件或 UUID 前缀 / 分叉 / 不落盘
+pi --continue "<prompt>"
+pi --resume
+pi --session <path|id> "<prompt>"
+pi --fork <path|id> "<prompt>"
+pi --no-session "<prompt>"
+
+# 指定精确会话 ID，不存在则以该 ID 新建（codeClaw 使用）
+pi --session-id <id> "<prompt>"
+
+# 追加系统提示，可多次；值可以是文本，也可以是文件路径（读取文件内容）
+pi --append-system-prompt <file-or-text> "<prompt>"
+
+# 完整替换系统提示
+pi --system-prompt "<text>" "<prompt>"
+
+# 工具白名单（只读模式）/ 黑名单 / 全关
+pi --tools read,grep,find,ls -p "<prompt>"
+pi --exclude-tools bash "<prompt>"
+pi --no-tools "<prompt>"
+
+# 推理强度
+pi --thinking off|minimal|low|medium|high|xhigh|max "<prompt>"
+
+# 信任项目级 .pi/ 资源（非交互模式默认不信任）
+pi --approve "<prompt>"
+
+# 模型列表 / 版本 / 扩展管理
+pi --list-models [search]
+pi --version
+pi list / pi install <source> / pi remove <source> / pi update [source|self]
+```
+
+## codeClaw 集成方式
+
+```bash
+pi --mode json --session-id <id> [--model <provider/model>] \
+   [--thinking <level>] [--tools <list>] \
+   --append-system-prompt <rules/AGENTS.md> \
+   --append-system-prompt <rules/admin.md> \
+   --append-system-prompt <runtime/server/memory-context.md> \
+   --approve <prompt>
+```
+
+| 参数 | codeClaw 的用法 |
+|------|-----------------|
+| `--mode json` | 输出 JSONL 事件流，逐行读 stdout |
+| `--session-id` | 会话 ID **由 codeClaw 生成**（uuid4 hex），按 `user_id:chat_id` 维度持久化后复用 |
+| `--append-system-prompt` | 规则与长期记忆的注入通道，等价于 opencode 的 `instructions[]` |
+| `--approve` | 非交互模式不弹信任提示，默认按 `defaultProjectTrust: ask` **忽略**项目级资源，需显式信任 |
+| `--tools` | 留空不传。它是 allowlist，传了会把扩展工具一起排除 |
+
+- 工作目录：`CODEX_WORK_DIR/pi/`
+- 输出读取：逐行 stdout，单行 idle 超时由 `PI_IDLE_TIMEOUT_SECONDS` 控制
+- 会话管理：pi 自行管理上下文窗口与压缩，codeClaw 不介入
+- 技能：由 codeClaw 扫 `SKILL_ROOTS` 生成摘要注入 prompt（仅首轮），模型再用内建 `read` 读 SKILL.md 正文
+- 时间感知：pi 不加载 opencode 的 `hooks/inject-time.js`，改由 `PiCliClient._time_context()` 在 prompt 首行拼 `<system-context>`
+
+## 配置项
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PI_CLI_BIN` | `pi` | 二进制路径，生产必须写绝对路径（见下文 supervisor 一节） |
+| `PI_MODEL` | （空） | 形如 `provider/model-id`；留空则用 pi 默认 provider |
+| `DASHSCOPE_API_KEY` | （空） | 百炼 Key，注入子进程环境供 models.json 的 `$DASHSCOPE_API_KEY` 插值 |
+| `PI_THINKING` | （空） | `--thinking` 参数，留空不传 |
+| `PI_TOOLS` | （空） | `--tools` allowlist，留空不传 |
+| `PI_CODING_AGENT_DIR` | （空） | pi 配置目录，留空用默认 `~/.pi/agent` |
+| `PI_OFFLINE` | `true` | 关闭启动期版本检查与遥测，降低每轮冷启动延迟 |
+| `PI_APPROVE_PROJECT` | `true` | 是否传 `--approve` |
+| `PI_TIMEOUT_SECONDS` | `300` | 单轮总超时 |
+| `PI_IDLE_TIMEOUT_SECONDS` | `120` | 单行 stdout idle 超时 |
+| `PI_SESSION_STORE_PATH` | `./runtime/server/pi-sessions.json` | session ID 持久化 |
+
+## 自定义模型注册（阿里云百炼）
+
+pi 不内置百炼 provider，需在 `~/.pi/agent/models.json` 注册（模板：`conf/pi/models.json.example`）：
+
+```json
+{
+  "providers": {
+    "bailian": {
+      "name": "阿里云百炼",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api": "openai-completions",
+      "apiKey": "$DASHSCOPE_API_KEY",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {
+          "id": "deepseek-v4-flash-0731",
+          "name": "DeepSeek V4 Flash 0731 (百炼)",
+          "reasoning": true
+        }
+      ]
+    }
+  }
+}
+```
+
+- `apiKey` 支持三种取值：字面量、`"$ENV_VAR"` 环境插值、`"!command"` 执行命令取 stdout。
+  这里用环境插值，密钥只落在 gitignored 的 `conf/.env`，不进仓库也不进 `ps`。
+- `compat` 两项是给 OpenAI 兼容端点的保守设置：不发 `developer` role（改发 `system`）、不发
+  `reasoning_effort`。
+- `contextWindow` / `maxTokens` 未填，用 pi 默认值 128000 / 16384（`--list-models` 显示 128K / 16.4K）。
+  填错会让自动压缩过早或过晚触发，确认百炼实际上限后再补。
+- 验证注册结果：`PI_OFFLINE=1 pi --list-models bailian`。models.json 在每次打开 `/model` 时重载，
+  改完不用重启 pi（但 codeClaw 侧改 `.env` 需要重启服务）。
+
+## 事件流 schema
+
+`--mode json` 的实测事件序列（0.83.0，bailian provider）：
+
+```
+session          首行，含 id / version / cwd；id 即 --session-id 传入的值
+agent_start
+turn_start
+message_start    role=user
+message_end      role=user        ← 注意：user 轮也有 message_end
+message_start    role=assistant，stopReason=pending
+message_update   assistantMessageEvent.type = text_start
+message_update   assistantMessageEvent.type = text_delta，delta 只含新增后缀
+message_update   assistantMessageEvent.type = text_end
+message_end      role=assistant，stopReason=stop，content[].text 为权威终态
+turn_end
+agent_end        willRetry=false（为 true 时不是真结束）
+agent_settled    真正结束标志
+```
+
+codeClaw 侧的三条解析规则：
+
+1. 只取 `message_update.assistantMessageEvent.text_delta` 的 `delta` 直接输出，
+   `thinking_delta` / `toolcall_delta` 一律丢弃，思考不进回复。
+2. `message_end` 必须判 `message.role == "assistant"`，否则会把用户的提问当回复回显。
+3. **`--mode json` 的退出码恒为 0**，认证失败也是 0。成败只能看
+   `message_end.message.stopReason`（`error` / `aborted`）与 `errorMessage`。实测：
+
+```json
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error",
+ "errorMessage":"401: {\"message\":\"Incorrect API key provided...\",\"code\":\"invalid_api_key\"}"}}
+```
+
+分帧按 `\n` 切即可（Python 的 `readline()` 合规）。不要对整段 stdout 做 `splitlines()`，
+它会在 `U+2028`/`U+2029` 上误切。
+
+### 成败判定：以最后一条 assistant message_end 为准（last-wins）
+
+pi 在**同一个进程内**会 auto-retry：第一次尝试可能 `stopReason=error` +
+`agent_end.willRetry=true`，重试后再给一条 `stopReason=stop`。所以判定规则是：
+
+- 只看**最后一条** assistant `message_end` 的 `stopReason`。是 `error` / `aborted` 就报错，
+  **即使前面已经流出了部分文本**——否则被截断的半截回答会当完整回答发给用户。
+- 中间尝试的失败不算失败。不能写成“出现任何错误事件就报错”，那会把重试成功的轮次误判为失败。
+- 一条 text_delta 都没有时，用 `message_end.message.content[].text` 兜底输出。
+- 流结束却从未出现 `agent_settled` 且无任何输出，同样按失败处理（宁可误报，不可静默回空）。
+
+## 与 opencode 的差异
+
+| 维度 | pi | opencode |
+|------|----|----------|
+| 流式增量 | 原生 delta，`delta` 只含新增后缀 | `text` 事件带累积全文，需按 `part.id` 自行 diff |
+| 会话 ID | `--session-id` 由调用方指定，不存在则创建 | 首轮不传 `--session`，从事件流反解 |
+| 会话存储 | `~/.pi/agent/sessions/` 下按 cwd 分目录的 JSONL 树 | SQLite（`~/.local/share/opencode/opencode.db`） |
+| 退出码 | **恒为 0**，错误只在事件流里 | 失败时非 0 |
+| 规则注入 | `--append-system-prompt`（可传文件路径） | `OPENCODE_CONFIG_CONTENT.instructions[]` |
+| 内建工具 | read / bash / edit / write（grep / find / ls 默认关） | 另有 webfetch / websearch / task / todowrite / lsp |
+| MCP | 不支持（官方明确不做，需第三方扩展） | 原生支持 |
+| 权限系统 | 无（官方立场：自己容器化） | `--permissions` 白名单 |
+| 插件 | TS extension（无法加载 opencode 的 `plugin`） | `plugin: ["file://..."]` |
+| 运行时 | Node ≥ 22.19.0 | Bun 单二进制 |
+
+## supervisor 下的注意事项
+
+1. **`PI_CLI_BIN` 必须写绝对路径 `/root/.local/bin/pi`。** `bin/run-app` 硬编码的 `PATH` 是
+   `/root/.opencode/bin:/root/.nvm/versions/node/v20.19.4/bin:/root/.pyenv/versions/3.10.13/bin:$PATH`，
+   **不含 `/root/.local/bin`**，写 `PI_CLI_BIN=pi` 会 command not found。
+2. **node 版本靠 wrapper 兜住。** 上述 PATH 里的 node 是 v20.19.4，低于 pi 要求的 22.19。
+   `/root/.local/bin/pi` 是一个把 node 钉在 v22.23.2 的 shell wrapper：
+
+   ```sh
+   #!/bin/sh
+   NODE22=/root/.nvm/versions/node/v22.23.2
+   exec "$NODE22/bin/node" "$NODE22/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$@"
+   ```
+
+   所以不要让 `pi update --self` 把它覆盖成 npm 原生 shim（`PI_OFFLINE=1` 已关掉启动期网络）。
+3. **spawn 必须 `stdin=DEVNULL`。** supervisor 给主进程的 stdin 是永不关闭的 pipe，而 pi 会把管道
+   stdin 并入首条 prompt，继承后会一直等 EOF 而不开跑。同理需要 `start_new_session=True` +
+   `os.killpg`，否则 `/stop` 只杀 pi 主进程，它启的 bash 子进程会漏成孤儿。
+4. `environment=HOME="/root"`，所以 `~/.pi/agent` 在服务进程下确定解析到 `/root/.pi/agent`。
+
+## 参考链接
+
+- pi 官网与文档：https://pi.dev/
+- pi 仓库：https://github.com/earendil-works/pi
+- JSON 模式：https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md
+- RPC 模式：https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md
+- 模型与 provider 配置：https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md
+- 百炼 OpenAI 兼容接口：https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope

@@ -59,7 +59,7 @@ class Settings(BaseSettings):
         validation_alias="CODEX_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
     )
 
-    active_backend: str = Field(default="opencode", validation_alias="ACTIVE_BACKEND")
+    active_backend: str = Field(default="pi", validation_alias="ACTIVE_BACKEND")
     backend_state_path: str = Field(default="./runtime/server/backend.json", validation_alias="BACKEND_STATE_PATH")
     claude_cli_bin: str = Field(default="claude", validation_alias="CLAUDE_CLI_BIN")
     claude_model: str = Field(default="", validation_alias="CLAUDE_MODEL")
@@ -77,6 +77,22 @@ class Settings(BaseSettings):
     opencode_session_store_path: str = Field(
         default="./runtime/server/opencode-sessions.json",
         validation_alias="OPENCODE_SESSION_STORE_PATH",
+    )
+    pi_cli_bin: str = Field(default="pi", validation_alias="PI_CLI_BIN")
+    pi_model: str = Field(default="", validation_alias="PI_MODEL")
+    # pi resolves "$DASHSCOPE_API_KEY" from models.json at request time, so the
+    # key travels as an environment variable rather than a CLI argument.
+    pi_api_key: str = Field(default="", validation_alias="DASHSCOPE_API_KEY")
+    pi_thinking: str = Field(default="", validation_alias="PI_THINKING")
+    pi_tools: str = Field(default="", validation_alias="PI_TOOLS")
+    pi_agent_dir: str = Field(default="", validation_alias="PI_CODING_AGENT_DIR")
+    pi_offline: bool = Field(default=True, validation_alias="PI_OFFLINE")
+    pi_approve_project: bool = Field(default=True, validation_alias="PI_APPROVE_PROJECT")
+    pi_timeout_seconds: float = Field(default=300.0, validation_alias="PI_TIMEOUT_SECONDS")
+    pi_idle_timeout_seconds: float = Field(default=120.0, validation_alias="PI_IDLE_TIMEOUT_SECONDS")
+    pi_session_store_path: str = Field(
+        default="./runtime/server/pi-sessions.json",
+        validation_alias="PI_SESSION_STORE_PATH",
     )
 
     max_history_rounds: int = Field(default=50, validation_alias="MAX_HISTORY_ROUNDS")

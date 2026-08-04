@@ -1,6 +1,6 @@
 # AGENTS.md
 
-个人 IM -> CLI 桥接服务。飞书 + 微信双通道接入，opencode 为核心后端。纯harnees开发
+个人 IM -> CLI 桥接服务。飞书 + 微信双通道接入，pi（Pi Coding Agent）为默认后端。纯harnees开发
 
 ## 设计哲学
 
@@ -10,7 +10,7 @@ codeClaw 不是智能体框架，是一层刻意做薄的 harness：
 
 - **不造智能**：会话记忆、上下文压缩、工具调用、代码生成、文件操作，全部由本机 CLI agent 原生承载，桥接层零重复实现
 - **只做编排**：消息收发、渠道适配（格式化/分段/图片上传）、后端路由切换——职责边界到此为止
-- **opencode-first**：opencode 为核心后端（原生 `--session` 会话自管）；codex/claude/qodercli 作为可切换备选，只维护不投入新特性，但需关注 CLI 升级后的变化，避免 bug
+- **CLI-native**：pi 为默认后端（原生 `--session-id` 会话自管，参考 `docs/references/pi-cli.txt`），opencode 为主要备选；codex/claude/qodercli 作为可切换备选，只维护不投入新特性，但需关注 CLI 升级后的变化，避免 bug
 
 判断标准很简单：一个能力如果 agent 原生支持，codeClaw 就不做。
 
@@ -36,8 +36,8 @@ lib/python/
 lib/js/wechat-sidecar.mjs → 微信 iLink Bot 长轮询 sidecar（Node.js）
 bin/server        → 服务控制（start/stop/restart/status/wx login|start|stop）
 conf/.env.example → 全部配置项及默认值（配置绑定在 lib/python/app/config.py）
-rules/            → 注入 opencode 的规则：AGENTS.md 公共 / admin.md 私有（gitignored）
-hooks/ skills/    → opencode 时间注入插件 / 项目级 skills
+rules/            → 注入后端的规则：AGENTS.md 公共 / admin.md 私有（gitignored）；pi 走 `--append-system-prompt`，opencode 走 `instructions`
+hooks/ skills/    → opencode 时间注入插件（pi 不加载，它在 prompt 首行拼时间）/ 项目级 skills
 docs/index.md     → 项目文档索引（架构/渠道/路由/会话/回归清单） **重点, 不了解项目的话优先看这里**
 ```
 

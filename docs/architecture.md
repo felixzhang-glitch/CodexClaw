@@ -20,8 +20,8 @@ graph TB
     A[IM 渠道层<br/>飞书 Webhook / 微信 Sidecar] --> B[Webhook 入口层<br/>FastAPI 路由、签名校验、事件解析]
     B --> C[业务处理层<br/>去重、命令分发、会话管理、流式回复]
     C --> D[后端路由层<br/>AgentRouter 多后端切换与持久化]
-    D --> E1[OpenCode CLI<br/>主力后端]
-    D --> E2[Codex / Claude / Qoder CLI<br/>备选后端]
+    D --> E1[Pi Agent<br/>主力后端]
+    D --> E2[OpenCode / Codex / Claude / Qoder CLI<br/>备选后端]
 ```
 
 ## 核心模块交互
@@ -30,7 +30,8 @@ graph TB
 graph TB
     H1[飞书 Handler] --> R[AgentRouter]
     H2[微信 Handler] --> R
-    R --> OC[OpenCodeClient 默认]
+    R --> PI[PiCliClient 默认]
+    R --> OC[OpenCodeCliClient]
     R --> CX[CodexClient]
     R --> CL[ClaudeCliClient]
     H1 --> SM[SessionManager]
@@ -68,11 +69,11 @@ codeClaw/
 ## 部署
 
 - 单实例 Uvicorn 进程，`./bin/start` 后台启动
-- 本机需预装 `opencode` CLI（主力）；`codex` / `claude` / `qodercli` 按需
+- 本机需预装 `pi` CLI（主力）；`opencode` / `codex` / `claude` / `qodercli` 按需
 - 外部依赖：飞书 OpenAPI（HTTP）、微信 iLink Bot API（HTTP 长轮询）
-- 持久化：`runtime/server/backend.json`（后端状态）、`runtime/server/reminders.json`（提醒）、`runtime/server/opencode-sessions.json`（opencode 会话 ID）
+- 持久化：`runtime/server/backend.json`（后端状态）、`runtime/server/reminders.json`（提醒）、`runtime/server/pi-sessions.json`（pi 会话 ID）、`runtime/server/opencode-sessions.json`（opencode 会话 ID）
 
-## 数据流（opencode 默认路径）
+## 数据流（pi 默认路径）
 
 ```
 用户发送消息
@@ -81,8 +82,8 @@ codeClaw/
       → 签名校验 + 去重
         → 命令分发（/help /new /stop /backend 等）
           → AgentRouter.chat_stream()
-            → OpenCodeClient: opencode run --session <id> <prompt>
-              → 流式读取 stdout
+            → PiCliClient: pi --mode json --session-id <id> <prompt>
+              → 逐行读 JSONL，取 text_delta 流式输出
                 → 汇总最终答案
                   → 渠道适配（Markdown 卡片 / 分段 / 图片上传）
                     → 回复用户

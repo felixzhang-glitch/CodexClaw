@@ -1,8 +1,8 @@
 # codeClaw
 
-> Harness 范式的工程落地：核心能力交给 opencode，codeClaw 收敛为接入层 + 后端路由
+> Harness 范式的工程落地：核心能力交给 CLI agent，codeClaw 收敛为接入层 + 后端路由
 
-飞书/微信消息桥接到本机 AI CLI（`opencode` / `codex` / `claude` / `qodercli`），后端运行时可切换。
+飞书/微信消息桥接到本机 AI CLI（`pi` / `opencode` / `codex` / `claude` / `qodercli`），后端运行时可切换。
 
 ## 设计哲学
 
@@ -12,7 +12,7 @@ codeClaw 不是智能体框架，是一层刻意做薄的 harness：
 
 - **不造智能**：会话记忆、上下文压缩、工具调用、代码生成、文件操作，全部由本机 CLI agent 原生承载，桥接层零重复实现
 - **只做编排**：消息收发、渠道适配（格式化/分段/图片上传）、后端路由切换——职责边界到此为止
-- **opencode-first**：opencode 为核心后端（原生 `--session` 会话自管）；codex/claude/qodercli 作为可切换备选，只维护不投入
+- **CLI-native**：pi 为默认后端（原生 `--session-id` 会话自管），opencode 为主要备选；codex/claude/qodercli 只维护不投入
 
 判断标准很简单：一个能力如果 agent 原生支持，codeClaw 就不做。
 
@@ -25,12 +25,12 @@ codeClaw 不是智能体框架，是一层刻意做薄的 harness：
 - 群聊 @ 机器人触发
 
 **多后端路由**
-- 四后端运行时通过 `/opencode` `/codex` `/claude` `/qodercli` 切换
+- 五后端运行时通过 `/pi` `/opencode` `/codex` `/claude` `/qodercli` 切换（默认 pi）
 - 状态持久化（`runtime/server/backend.json`，重启保留）
 - 切换隔离：清空会话上下文 + 各后端独立工作目录
 
 **会话与任务**
-- opencode 走原生会话续接，上下文与压缩由 opencode 自管；备选后端按轮数拼接历史
+- pi / opencode 走原生会话续接，上下文与压缩由后端自管；其余后端按轮数拼接历史
 - 长期记忆 `memory/`：仅用户明确要求时写入并回执，分类 markdown 存放，常驻注入每轮在场，本地 git 快照可审查回滚（详见 [docs/memory.md](docs/memory.md)）
 - 消息去重（TTL 1 小时）+ per-session FIFO 消息队列
 - 定时提醒 `/remind`、每日定时简报 `/daily`（飞书 + 微信推送）
@@ -109,7 +109,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 | `/compact` | 压缩会话上下文（`/compress` 同义） |
 | `/stop` | 终止当前任务 + 清空排队消息 |
 | `/backend` | 查看当前后端及可切换列表 |
-| `/opencode` `/codex` `/claude` `/qodercli` | 切换后端 |
+| `/pi` `/opencode` `/codex` `/claude` `/qodercli` | 切换后端 |
 | `/skills` | 列出本机可用 skills |
 | `/remind 10m 喝水` | 定时提醒，支持 `s/m/h/d`（`/timer` 同义） |
 | `/daily 08:00 AI简报` | 每日定时任务；`/daily list` 查看，`/daily cancel <id>` 取消 |
@@ -126,7 +126,7 @@ WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串
 | `rules/admin.md` | 私人信息：管理员身份、个人偏好 | 否（已 gitignore） |
 | `rules/admin.md.example` | admin.md 脱敏范例 | 是 |
 
-两个文件通过 opencode 原生 `instructions` 配置直接加载源文件，**修改后立即生效，无需重启**，对新老会话均即时生效。
+两个文件直接加载源文件（pi 走 `--append-system-prompt`，opencode 走原生 `instructions` 配置），**修改后立即生效，无需重启**，对新老会话均即时生效。
 
 ```bash
 cp rules/admin.md.example rules/admin.md   # 首次使用
@@ -139,6 +139,8 @@ cp rules/admin.md.example rules/admin.md   # 首次使用
 ### hooks（时间感知）
 
 `hooks/inject-time.js` 是 opencode 插件，在每条用户消息末尾注入当前系统时间，让机器人正确理解"明天"、"刚才"。删除该文件即禁用（fail-open）。
+
+pi 无法加载 opencode 插件，它的时间注入由 `PiCliClient._time_context()` 在 prompt 首行拼 `<system-context>` 完成，同样 fail-open。
 
 ### 提示词隔离
 
@@ -163,7 +165,11 @@ cp rules/admin.md.example rules/admin.md   # 首次使用
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ACTIVE_BACKEND` | `opencode` | 初始后端 |
+| `ACTIVE_BACKEND` | `pi` | 初始后端（`runtime/server/backend.json` 优先于此） |
+| `PI_CLI_BIN` | `pi` | pi 二进制；supervisor 下必须给绝对路径 `/root/.local/bin/pi` |
+| `PI_MODEL` | | 可空，形如 `bailian/deepseek-v4-flash-0731`；provider 在 `~/.pi/agent/models.json` 注册 |
+| `DASHSCOPE_API_KEY` | | 百炼 Key，models.json 以 `$DASHSCOPE_API_KEY` 引用 |
+| `PI_IDLE_TIMEOUT_SECONDS` | `120` | stdout idle 超时 |
 | `OPENCODE_CLI_BIN` | `opencode` | opencode 二进制 |
 | `OPENCODE_MODEL` | | 可空，形如 `provider/model` |
 | `OPENCODE_IDLE_TIMEOUT_SECONDS` | `120` | stdout idle 超时 |
@@ -175,7 +181,7 @@ cp rules/admin.md.example rules/admin.md   # 首次使用
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `MAX_HISTORY_ROUNDS` | `50` | 备选后端历史拼接轮数（opencode 不受此限） |
+| `MAX_HISTORY_ROUNDS` | `50` | 备选后端历史拼接轮数（pi / opencode 不受此限） |
 | `WECHAT_WEBHOOK_TOKEN` | | 微信 webhook 共享 token |
 | `WECHAT_SIDECAR_BASE_URL` | `http://127.0.0.1:8787` | sidecar 地址（主动推送用） |
 | `DEDUPLICATE_TTL_SECONDS` | `3600` | 消息去重 TTL |
@@ -189,12 +195,12 @@ cp rules/admin.md.example rules/admin.md   # 首次使用
 bin/
   server              # 服务控制（start|stop|restart|status|wx）
   start               # 快捷入口（默认后台，-f 前台）
-conf/                 # .env / requirements / pytest.ini
+conf/                 # .env / requirements / pytest.ini / pi 的 models.json 模板
 lib/python/
   app/                # FastAPI 入口、配置、命令分发、规则热加载、日志
   channel/feishu/     # 飞书全链路：handler / ws_client / security / client / formatting / media
   channel/wechat/     # 微信渠道处理
-  core/agent/         # 多后端路由器 + opencode/claude CLI 客户端
+  core/agent/         # 多后端路由器 + pi/opencode/claude CLI 客户端
   core/codex/         # Codex CLI 客户端（超时/重试/熔断）
   core/session/       # 会话 / 去重 / 任务注册 / 提醒 / 每日任务 / 消息队列
 lib/js/
@@ -223,8 +229,10 @@ pytest -c conf/pytest.ini -q
 |------|---------|
 | `invalid feishu signature` | `FEISHU_ENCRYPT_KEY` 与平台不一致 |
 | `failed to fetch tenant access token` | `App ID/Secret` 无效或权限不足 |
+| `pi cli error: ...invalid_api_key` | `DASHSCOPE_API_KEY` 无效或 `~/.pi/agent/models.json` 未注册 provider |
+| `pi: command not found`（supervisor 下） | `PI_CLI_BIN` 要写绝对路径 `/root/.local/bin/pi` |
 | `codex cli failed` | 本机 CLI 未登录或不可执行 |
 | `codex cli timeout` | 调大对应后端 `*_TIMEOUT_SECONDS`（stdout 沉默超时） |
 | `/stop` 未终止任务 | 确认同一会话发送；查日志 `event=pipeline.cancel` |
 
-更多：架构 [docs/architecture.md](docs/architecture.md) · 渠道 [docs/channels.md](docs/channels.md) · 路由 [docs/routing.md](docs/routing.md) · 会话 [docs/sessions.md](docs/sessions.md)
+更多：架构 [docs/architecture.md](docs/architecture.md) · 渠道 [docs/channels.md](docs/channels.md) · 路由 [docs/routing.md](docs/routing.md) · 会话 [docs/sessions.md](docs/sessions.md) · pi CLI [docs/references/pi-cli.txt](docs/references/pi-cli.txt)
