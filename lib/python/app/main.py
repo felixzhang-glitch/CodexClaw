@@ -26,7 +26,7 @@ settings = get_settings()
 setup_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="codeClaw", version="0.5.0")
+app = FastAPI(title="codeClaw", version="0.6.0")
 
 session_manager = SessionManager(max_history_rounds=settings.max_history_rounds)
 deduplicator = MessageDeduplicator(ttl_seconds=settings.deduplicate_ttl_seconds)
