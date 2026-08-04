@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # pi resolves "$DASHSCOPE_API_KEY" from models.json at request time, so the
     # key travels as an environment variable rather than a CLI argument.
     pi_api_key: str = Field(default="", validation_alias="DASHSCOPE_API_KEY")
-    pi_thinking: str = Field(default="", validation_alias="PI_THINKING")
+    pi_thinking: str = Field(default="high", validation_alias="PI_THINKING")
     pi_tools: str = Field(default="", validation_alias="PI_TOOLS")
     pi_agent_dir: str = Field(default="", validation_alias="PI_CODING_AGENT_DIR")
     pi_offline: bool = Field(default=True, validation_alias="PI_OFFLINE")

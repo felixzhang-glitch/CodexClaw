@@ -7,7 +7,7 @@
       "apiKey": "$DASHSCOPE_API_KEY",
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
+        "supportsReasoningEffort": true
       },
       "models": [
         {

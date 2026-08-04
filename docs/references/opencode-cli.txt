@@ -58,7 +58,8 @@ opencode run --session <session_id> [--model <model>] [--agent <agent>] <prompt>
 ```
 
 codeClaw 通过 `OPENCODE_CONFIG_CONTENT` 注入的配置（permission / instructions / plugin）与这份
-全局配置是**合并**关系，不会覆盖 provider 注册。
+全局配置是**合并**关系，不会覆盖 provider 注册。仓内模板见 `conf/opencode/opencode.jsonc.example`，
+重装机器时复制到 `~/.config/opencode/opencode.jsonc` 即可（含下文的 `reasoningEffort` 注册）。
 
 ### 推理模型必须带 reasoning: true
 

@@ -85,7 +85,7 @@ pi --mode json --session-id <id> [--model <provider/model>] \
 | `PI_CLI_BIN` | `pi` | 二进制路径，生产必须写绝对路径（见下文 supervisor 一节） |
 | `PI_MODEL` | （空） | 形如 `provider/model-id`；留空则用 pi 默认 provider |
 | `DASHSCOPE_API_KEY` | （空） | 百炼 Key，注入子进程环境供 models.json 的 `$DASHSCOPE_API_KEY` 插值 |
-| `PI_THINKING` | （空） | `--thinking` 参数，留空不传 |
+| `PI_THINKING` | `high` | 推理强度 reasoning_effort，经 `--thinking` 下发；取值 `off/minimal/low/medium/high/xhigh/max`，留空不传（详见下文推理强度一节） |
 | `PI_TOOLS` | （空） | `--tools` allowlist，留空不传 |
 | `PI_CODING_AGENT_DIR` | （空） | pi 配置目录，留空用默认 `~/.pi/agent` |
 | `PI_OFFLINE` | `true` | 关闭启动期版本检查与遥测，降低每轮冷启动延迟 |
@@ -108,7 +108,7 @@ pi 不内置百炼 provider，需在 `~/.pi/agent/models.json` 注册（模板�
       "apiKey": "$DASHSCOPE_API_KEY",
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
+        "supportsReasoningEffort": true
       },
       "models": [
         {
@@ -124,12 +124,32 @@ pi 不内置百炼 provider，需在 `~/.pi/agent/models.json` 注册（模板�
 
 - `apiKey` 支持三种取值：字面量、`"$ENV_VAR"` 环境插值、`"!command"` 执行命令取 stdout。
   这里用环境插值，密钥只落在 gitignored 的 `conf/.env`，不进仓库也不进 `ps`。
-- `compat` 两项是给 OpenAI 兼容端点的保守设置：不发 `developer` role（改发 `system`）、不发
-  `reasoning_effort`。
+- `compat.supportsDeveloperRole: false` 是给 OpenAI 兼容端点的保守设置：不发 `developer` role
+  （改发 `system`）。`compat.supportsReasoningEffort: true` 放行 `reasoning_effort` 下发，
+  强度由 `--thinking` / `PI_THINKING` 控制（见下文推理强度一节）。
 - `contextWindow` / `maxTokens` 未填，用 pi 默认值 128000 / 16384（`--list-models` 显示 128K / 16.4K）。
   填错会让自动压缩过早或过晚触发，确认百炼实际上限后再补。
 - 验证注册结果：`PI_OFFLINE=1 pi --list-models bailian`。models.json 在每次打开 `/model` 时重载，
   改完不用重启 pi（但 codeClaw 侧改 `.env` 需要重启服务）。
+
+## 推理强度 reasoning_effort
+
+pi 的 `--thinking <level>` 对 openai-completions provider 会转成请求体的 `reasoning_effort`，
+前提是 models.json 里 `compat.supportsReasoningEffort: true`（为 `false` 时 pi 会把该参数剥掉）。
+codeClaw 侧由 `PI_THINKING` 控制，默认 `high`，经 [pi_cli.py](../../lib/python/core/agent/pi_cli.py) 的 `--thinking` 下发。
+
+百炼文档原文：
+
+> deepseek-v4-pro、deepseek-v4-flash 和 deepseek-v4-flash-0731 默认开启思考模式。
+> 通过 `reasoning_effort` 可调推理强度，可选值 `low`、`medium`、`high`、`xhigh`、`max`，默认 `high`。
+> 其中 `low`、`medium` 等同 `high`；`xhigh` 等同 `max`。
+
+即实际只有两档：`{low, medium, high}` → high，`{xhigh, max}` → max。写 `low` 等于不写，
+想加深推理只有 `xhigh`/`max` 有效，代价是延迟和 token 上升。因为该模型默认就开思考，
+`PI_THINKING=high` 与服务端默认等效，只是把档位变得显式且可调；`PI_THINKING=off` 则关思考。
+
+这与 opencode 侧同源：opencode 用 `~/.config/opencode/opencode.jsonc` 里的 `options.reasoningEffort`（见
+[opencode-cli.txt](opencode-cli.txt) 推理强度一节），两者映射一致。
 
 ## 事件流 schema
 

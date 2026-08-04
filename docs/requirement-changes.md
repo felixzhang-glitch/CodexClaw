@@ -3,6 +3,13 @@
 > 本文件稳定维护：每次需求变化（新功能、行为调整、架构决策变更）在此追加一条记录。
 > 格式：日期 + 版本/提交 + 需求内容 + 影响范围。新记录添加在最上方。
 
+## 2026-08-04 · v0.6.0 后续补丁 · pi 推理强度 reasoning_effort 可调
+
+- **问题**：pi 的 models.json 里 `compat.supportsReasoningEffort: false`（初次接 pi 时的保守设置）会把 `reasoning_effort` 从每次请求剥掉，叠加 `PI_THINKING=` 空，pi 一个 effort 值都不下发。注：deepseek-v4-flash-0731 服务端默认思考模式即 `high`，所以此前实际仍在 high 档跑，本次是把档位变显式且可调，并解锁 `xhigh`/`max`
+- **pi 改动**：`~/.pi/agent/models.json` 与 `conf/pi/models.json.example` 的 `supportsReasoningEffort` 翻为 `true`；`PI_THINKING` 默认值 `"" → "high"`（config.py + conf/.env + .env.example）。取值 `off/minimal/low/medium/high/xhigh/max`，百炼实际两档（low/medium/high→high，xhigh/max→max）
+- **opencode**：线上 `~/.config/opencode/opencode.jsonc` 已含 `reasoningEffort: high`（v0.6.0 前的 8e73344 已做），本次仅补仓内模板 `conf/opencode/opencode.jsonc.example` 防重建丢失，无行为变化
+- 影响：`lib/python/app/config.py`、`conf/.env*`、`conf/pi/models.json.example`、`conf/opencode/opencode.jsonc.example`（新增）、`docs/references/{pi-cli,opencode-cli}.txt`、`~/.pi/agent/models.json`；上线靠 `supervisorctl restart codeclaw-stack:codeclaw`
+
 ## 2026-08-04 · v0.6.0 · 新增 pi 后端并设为默认
 
 - **需求**：新增 pi（Pi Coding Agent 0.83.0）作为第 5 个可切换后端并设为默认，模型走阿里云百炼；skills / 记忆 / 规则等现有能力不受影响
