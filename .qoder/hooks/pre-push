@@ -44,6 +44,12 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     continue
   fi
 
+  # 先把远端 ref 同步到本地，让 merge-base 能找到远端提交。远端被 rebase 后
+  # remote_sha 往往不在本地仓库，直接拿来当 base 会让 git diff 报 bad object。
+  if [ -n "$remote_ref" ] && [ "$remote_ref" != "$ZERO" ]; then
+    git fetch --quiet --no-tags "$remote_ref" "$remote_ref" 2>/dev/null || true
+  fi
+
   if [ "$remote_sha" = "$ZERO" ]; then
     # 新分支：优先与远端默认分支求 merge-base，失败回退空树（等价全量扫该分支）
     base="$(git merge-base "$local_sha" origin/HEAD 2>/dev/null || true)"
@@ -55,7 +61,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     fi
     [ -z "$base" ] && base="$EMPTY_TREE"
   else
-    base="$remote_sha"
+    # 远端 SHA 在本地仓库（fetch 后）就用 merge-base 精确找共同祖先；
+    # 否则回退到远端跟踪分支或空树，保证 git diff 不会报 bad object。
+    base="$(git merge-base "$local_sha" "$remote_sha" 2>/dev/null || true)"
+    if [ -z "$base" ] && git rev-parse --verify -q "$remote_ref" >/dev/null 2>&1; then
+      base="$(git merge-base "$local_sha" "$remote_ref" 2>/dev/null || true)"
+    fi
+    [ -z "$base" ] && base="$EMPTY_TREE"
   fi
 
   scanned=1
