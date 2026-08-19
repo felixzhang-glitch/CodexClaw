@@ -1,6 +1,6 @@
 # pi CLI 参考
 
-pi（Pi Coding Agent，https://pi.dev）是 codeClaw 的默认后端。本机版本 0.83.0。
+pi（Pi Coding Agent，https://pi.dev）是 codeClaw 的默认后端。本机版本 0.84.2。
 
 ## 基本用法
 
@@ -127,8 +127,11 @@ pi 不内置百炼 provider，需在 `~/.pi/agent/models.json` 注册（模板�
 - `compat.supportsDeveloperRole: false` 是给 OpenAI 兼容端点的保守设置：不发 `developer` role
   （改发 `system`）。`compat.supportsReasoningEffort: true` 放行 `reasoning_effort` 下发，
   强度由 `--thinking` / `PI_THINKING` 控制（见下文推理强度一节）。
-- `contextWindow` / `maxTokens` 未填，用 pi 默认值 128000 / 16384（`--list-models` 显示 128K / 16.4K）。
-  填错会让自动压缩过早或过晚触发，确认百炼实际上限后再补。
+- `contextWindow: 1000000` / `maxTokens: 16384` 已显式声明（`--list-models` 显示 1M / 16.4K）。
+  依据：百炼公告 DeepSeek-V4-Flash-0731「原生 1M 超长上下文，最大输出 384K」，官方 API 文档
+  则说 `max_tokens` 与 `thinking_budget` 合计上限 393,216。`maxTokens` 取 16384（= pi 旧默认值）
+  是为了把隐式默认变显式，IM 回复场景够用，同时钉住压缩摘要的输出预算。
+  两个字段未填时用 pi 默认 128000 / 16384，填错会让自动压缩过早或过晚触发。
 - 验证注册结果：`PI_OFFLINE=1 pi --list-models bailian`。models.json 在每次打开 `/model` 时重载，
   改完不用重启 pi（但 codeClaw 侧改 `.env` 需要重启服务）。
 
@@ -151,9 +154,41 @@ codeClaw 侧由 `PI_THINKING` 控制，默认 `high`，经 [pi_cli.py](../../lib
 这与 opencode 侧同源：opencode 用 `~/.config/opencode/opencode.jsonc` 里的 `options.reasoningEffort`（见
 [opencode-cli.txt](opencode-cli.txt) 推理强度一节），两者映射一致。
 
+## 上下文自动压缩
+
+压缩由 pi 自己承担（`core/compaction`），codeClaw 零参与。参数写在 `~/.pi/agent/settings.json`，
+仓内模板 `conf/pi/settings.json.example`：
+
+```json
+{
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 200000,
+    "keepRecentTokens": 150000
+  }
+}
+```
+
+- 触发条件：`contextTokens > contextWindow - reserveTokens`，即 `1000000 - 200000 = 800000`
+  （窗口的 80%）。字段缺失时默认 `reserveTokens: 16384` / `keepRecentTokens: 20000`，
+  那套默认是按 128K 窗口调的，搭 1M 窗口会变成“几乎不压缩，压一次又只留 20k”。
+- 保留策略：从最新往回累计到 `keepRecentTokens`（150k）为止的消息原文保留，更早的交给 LLM
+  生成摘要（能与上一次摘要迭代合并）；切点只落在 user/assistant 消息，不切断 tool result。
+- 摘要调用的输出上限是 `min(0.8 × reserveTokens, maxTokens)`，即 `min(160000, 16384) = 16384`。
+- 两个触发点都在 `AgentSession` 核心里，与运行模式无关，`--mode json` 同样生效：
+  `agent_end` 之后；以及发新 prompt 之前（pre-prompt check，对 codeClaw 每轮新进程恢复会话的
+  模式尤其重要）。另有 overflow 分支：LLM 报上下文溢出时先压缩再自动重试。
+- 历史实测：微信主会话在 128K 窗口时以 111,616 为阈值，2026-08-07（tokensBefore=112641）与
+  2026-08-14（111738）各触发一次，阈值公式已被真实数据验证。
+- 注意：codeClaw 的 `/compact` 命令压的是它自己 SessionManager 的 rounds，而 pi 路径下
+  只发最后一条用户消息，所以 `/compact` 对 pi 的真实上下文是空操作；真要清上下文用 `/new`
+  或 `/reset`（会删掉 session_key → pi session id 映射，下轮新建 pi 会话）。
+- 注入的 system prompt（`--append-system-prompt` 的 rules + memory，约 5.5KB）**不参与压缩**，
+  压缩只处理会话消息，它每轮都在场。
+
 ## 事件流 schema
 
-`--mode json` 的实测事件序列（0.83.0，bailian provider）：
+`--mode json` 的实测事件序列（0.84.2，bailian provider）：
 
 ```
 session          首行，含 id / version / cwd；id 即 --session-id 传入的值

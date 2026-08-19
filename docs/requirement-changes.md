@@ -3,6 +3,30 @@
 > 本文件稳定维护：每次需求变化（新功能、行为调整、架构决策变更）在此追加一条记录。
 > 格式：日期 + 版本/提交 + 需求内容 + 影响范围。新记录添加在最上方。
 
+## 2026-08-19 · pi 升级 0.84.2 + 1M 上下文与 80% 压缩阈值
+
+- **需求**：把 pi 升到最新稳定版，并把上下文窗口拉到 1M、自动压缩阈值改为窗口的 80%
+- **pi 升级**：`npm install -g @earendil-works/pi-coding-agent@0.84.2`（0.83.0 → 0.84.2）。`engines: node >=22.19.0`，`/root/.local/bin/pi` wrapper 钉的 v22.23.2 满足，wrapper 未动
+- **0.84.0 breaking change 已排查并实测**：`message_update` 改为只发 `assistantMessageEvent` delta、移除累积 `message` 与 `partial`。codeClaw 不受影响，因为 `pi_cli.py` 本来只读 `assistantMessageEvent.text_delta.delta` 与权威的 `message_end.message`。实测 0.84.2 输出：`message_update` 中带累积 `message` 的为 0 个，`text_delta` 在场，用 codeClaw 的解析器直接回放能拼出正确回复
+- **1M 上下文**：`~/.pi/agent/models.json` 与 `conf/pi/models.json.example` 的模型条目补 `contextWindow: 1000000` / `maxTokens: 16384`。依据：百炼公告 DeepSeek-V4-Flash-0731「原生 1M 超长上下文，最大输出 384K」；官方 API 文档说 `max_tokens` 与 `thinking_budget` 合计上限 393,216。`maxTokens` 取 16384 = pi 旧隐式默认值，行为零变化，只为防止未来 pi 改默认值时静默漂移。`--list-models` 已从 128K 变为 1M
+- **80% 压缩**：`~/.pi/agent/settings.json` 新增 `compaction: {enabled: true, reserveTokens: 200000, keepRecentTokens: 150000}`，仓内新模板 `conf/pi/settings.json.example`。pi 的公式是 `contextTokens > contextWindow - reserveTokens` → `1000000-200000 = 800000`（窗口 80%）。`keepRecentTokens` 从默认 20000 抬到 150000，因为那套默认是按 128K 窗口调的，搭 1M 会变成“压一次只剩 20k”。摘要输出预算 `min(0.8×reserveTokens, maxTokens) = 16384`，与现状一致
+- **压缩机制已摸清**（写进 `docs/references/pi-cli.txt` 新增的“上下文自动压缩”一节）：两个触发点在 `AgentSession` 核心（`agent_end` 之后 + 发新 prompt 之前的 pre-prompt check），与运行模式无关，`--mode json` 同样生效；另有 overflow 分支会先压缩再重试。历史实测：微信主会话在 128K 窗口下以 111,616 为阈值触发过 2 次（2026-08-07 tokensBefore=112641、2026-08-14 111738），阈值公式已被真实数据验证
+- **验证**：`pi --version` = 0.84.2；`--list-models` 显示 1M / 16.4K；新会话 json 冲烟（delta + message_end 形状与 0.83.0 一致）；0.83.0 写入的存量会话能被 0.84.2 恢复（用 timecheck:1 测试会话，stderr 无 creating a new session，cacheRead=1024）；无效 API key 仍 `EXIT=0` + `stopReason=error` + 401 errorMessage（退出码陷阱在 0.84.2 依旧）；`pytest -q --ignore=tests/test_feishu_ws.py` 188 passed
+- 影响：`~/.pi/agent/models.json`、`~/.pi/agent/settings.json`（均已备份 `.bak.20260819`）、`conf/pi/models.json.example`、`conf/pi/settings.json.example`（新增）、`docs/references/pi-cli.txt`、`tests/test_pi_session.py` 与 `tests/test_pi_chain.py` 的版本标注。**无 codeClaw 代码改动，不改 `conf/.env`，不需 supervisorctl 重启**（models.json / settings.json 由每轮新起的 pi 进程读取）
+- **成本注意**：阈值从 111,616 提到 800,000 后，微信主会话（当前约 100k tokens/轮）会继续长到约 8 倍才压缩；按百炼 ¥1/百万 input tokens、缓存未命中估算，单轮 input 成本上限从约 ¥0.1 升到约 ¥0.8。需要限制开销时调高 `reserveTokens` 即可
+- **遗留**：`/compact` 对 pi 后端仍是空操作（它压的是 codeClaw 自己的 rounds，而 pi 路径只发最后一条用户消息），真要清上下文用 `/new` 或 `/reset`；本次未修，已记入 pi-cli.txt
+
+## 2026-08-07 · 新增 pre-push 密钥扫描钩子
+
+- **需求**：仓库是 public repo，需要一道 `git push` 前的自动闸门，防止 AK/SK、API Key、Token、私钥等敏感信息随代码推上 GitHub（尤其是模型生成内容的误提交）
+- **实现**：`.qoder/hooks/secret_scan.py`（Python 3 标准库，零依赖）+ `.qoder/hooks/pre-push`（解析 git 传入的 ref，算出待推送区间），`install.sh` 把它挂到 `.git/hooks/pre-push`
+- **扫描策略**：只扫本次待推送 commit 的**新增行**（`git diff --unified=0`），命中即 exit 1 硬阻断；fail-closed（扫描器异常退出、python3 缺失也阻断）；逆转开关 `SKIP_SECRET_SCAN=1 git push`
+- **挂载方式**：刻意**不改 `git config core.hooksPath`**，而是在 `.git/hooks/pre-push` 写一个转发脚本。原因：`.git/hooks/post-commit`（Qoder AI tracker）已在使用，改 hooksPath 会让它静默失效
+- **规则覆盖**：AWS/Azure/阿里云/腾讯云/火山、OpenAI/Anthropic/DashScope/智谱/Google/HF、GitHub/GitLab/npm/PyPI、飞书（app id / tenant token / 机器人 webhook）/微信/钉钉/Slack、Notion/Stripe/SendGrid/Twilio/Telegram、PRIVATE KEY 块 / JWT / 带口令连接串 / `Authorization: Bearer`、项目专属环境变量（`FEISHU_APP_SECRET` 等六个）、危险文件名（`.env`、`*.pem`、`id_rsa*`、`conf/wechat/account.json`、`rules/admin.md` 等）
+- **降噪关键决策**：香农熵**不做独立规则**，仅用于关键字类弱规则命中后的二次确认（否则 lockfile 哈希/UUID 大面积误报）；含非 ASCII 字符的值一律当占位符（实测修正了 `README.md` 里 `WECHAT_WEBHOOK_TOKEN=请换成一段随机字符串` 的误报）；标识符/路径/版本号形态放行；三种白名单条目（`path:` / `regex:` / `fingerprint:`）+ 行尾 `secret-scan: ignore`
+- **入库**：`.gitignore` 新增 `!.qoder/hooks/` 白名单（否则 `.qoder/*` 会让钩子无法随仓库分发）；个人白名单 `secret-allowlist.local.txt` 保持 gitignored
+- 影响：`.qoder/hooks/`（新增）、`.gitignore`、`docs/index.md`、`tests/test_secret_scan.py`（新增 51 个用例）、`.git/hooks/pre-push`（本机，不入库，克隆后需自行跑 `bash .qoder/hooks/install.sh`）。无服务端改动，不需重启
+
 ## 2026-08-04 · v0.6.0 后续补丁 · pi 推理强度 reasoning_effort 可调
 
 - **问题**：pi 的 models.json 里 `compat.supportsReasoningEffort: false`（初次接 pi 时的保守设置）会把 `reasoning_effort` 从每次请求剥掉，叠加 `PI_THINKING=` 空，pi 一个 effort 值都不下发。注：deepseek-v4-flash-0731 服务端默认思考模式即 `high`，所以此前实际仍在 high 档跑，本次是把档位变显式且可调，并解锁 `xhigh`/`max`

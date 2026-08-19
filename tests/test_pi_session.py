@@ -1,9 +1,13 @@
 """Unit tests for the pi backend client.
 
-Event fixtures mirror what `pi --mode json` (v0.83.0) actually emits, including
-the two traps that version has: `message_end` fires for the user turn as well as
-the assistant one, and the process exits 0 even when the provider rejects the
-request.
+Event fixtures mirror what `pi --mode json` actually emits (captured on v0.83.0,
+shape re-verified against v0.84.2), including the two traps it has: `message_end`
+fires for the user turn as well as the assistant one, and the process exits 0
+even when the provider rejects the request.
+
+v0.84.0 dropped the cumulative `message` field from `message_update`; these
+fixtures never carried it, because the client only reads
+`assistantMessageEvent.text_delta.delta` plus the authoritative `message_end`.
 """
 
 import asyncio
@@ -376,7 +380,7 @@ async def test_nonzero_exit_code_still_raises(tmp_path) -> None:
 def test_system_prompt_files_carry_rules_and_memory(tmp_path) -> None:
     """Rules and memory reach pi through --append-system-prompt.
 
-    pi 0.83.0's --append-system-prompt reads a path's contents, which is what
+    pi 0.84.2's --append-system-prompt reads a path's contents, which is what
     lets memory keep riding a per-turn file instead of a first-turn preamble.
     """
     memory_path = str(tmp_path / "memory-context.md")

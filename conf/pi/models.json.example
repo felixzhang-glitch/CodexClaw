@@ -13,7 +13,9 @@
         {
           "id": "deepseek-v4-flash-0731",
           "name": "DeepSeek V4 Flash 0731 (百炼)",
-          "reasoning": true
+          "reasoning": true,
+          "contextWindow": 1000000,
+          "maxTokens": 16384
         }
       ]
     }

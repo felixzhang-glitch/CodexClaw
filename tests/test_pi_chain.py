@@ -1,10 +1,11 @@
 """End-to-end chain tests: channel handler -> AgentRouter -> pi CLI.
 
 The pi subprocess is faked at the `create_subprocess_exec` boundary and replays
-the exact JSONL shape observed from `pi --mode json` (v0.83.0, provider
-bailian/deepseek-v4-flash-0731), so everything above the process boundary is the
-real code path: command building, system-prompt file injection, delta parsing,
-session id ownership and persistence, router dispatch, and the channel reply.
+the exact JSONL shape observed from `pi --mode json` (captured on v0.83.0, shape
+re-verified against v0.84.2, provider bailian/deepseek-v4-flash-0731), so
+everything above the process boundary is the real code path: command building,
+system-prompt file injection, delta parsing, session id ownership and
+persistence, router dispatch, and the channel reply.
 """
 
 import asyncio
@@ -405,9 +406,10 @@ async def test_thinking_deltas_never_reach_either_channel(tmp_path) -> None:
 async def test_provider_error_with_exit_code_zero_replies_generic_error(tmp_path) -> None:
     """`pi --mode json` exits 0 on provider failures.
 
-    Verified against pi 0.83.0: an invalid API key still gives `EXIT=0` and the
-    only signal is the assistant `message_end` carrying `stopReason: "error"`.
-    Trusting the exit code would ship the failure to the user as an empty reply.
+    Verified against pi 0.83.0 and re-checked on 0.84.2: an invalid API key still
+    gives `EXIT=0` and the only signal is the assistant `message_end` carrying
+    `stopReason: "error"`. Trusting the exit code would ship the failure to the
+    user as an empty reply.
     """
     settings = _make_settings(tmp_path)
     feishu_client = FakeFeishuClient()
