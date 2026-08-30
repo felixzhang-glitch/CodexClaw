@@ -18,3 +18,4 @@ rules/admin.md
 /memory/*
 !/memory/README.md
 .DS_Store
+.reasonix/

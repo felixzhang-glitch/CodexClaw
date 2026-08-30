@@ -10,8 +10,8 @@
 | 配置 | pydantic-settings | 环境变量绑定与校验 |
 | 加密 | cryptography | 飞书回调解密（AES-CBC） |
 | Sidecar | Node.js | 微信 iLink Bot 长轮询 |
-| 核心后端 | opencode CLI | AI 推理（默认） |
-| 备选后端 | codex / claude / qodercli | 可切换 |
+| 核心后端 | pi（Pi Coding Agent） | AI 推理（默认） |
+| 备选后端 | opencode / codex / claude / qodercli | 可切换 |
 
 ## 架构分层
 
