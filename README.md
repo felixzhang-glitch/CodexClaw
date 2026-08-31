@@ -1,3 +1,5 @@
+
+
 # codeClaw
 
 > 能力归 agent，编排归 harness。
@@ -65,6 +67,7 @@ lib/python/   # Python 服务
 lib/js/       # 微信 sidecar
 rules/        # 提示词规则（热加载）
 skills/       # 项目级技能
+memory/       # 长期记忆目录
 hooks/        # 时间注入插件
 docs/         # 文档
 tests/        # 测试
