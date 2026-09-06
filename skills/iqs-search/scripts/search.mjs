@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
- * IQS Search Script
+ * IQS Search Script (联网搜索-搜文)
  * Usage: node search.mjs --query "search terms" [options]
+ * API doc: https://help.aliyun.com/zh/document_detail/2883041.html
  */
 const API_ENDPOINT = 'https://cloud-iqs.aliyuncs.com/search/unified';
 
-/**
- * Parse command line arguments
- * @param {string[]} args - Process arguments
- * @returns {Object} Parsed options
- */
+const VALID_ENGINE_TYPES = ['Generic', 'GenericAdvanced', 'LiteAdvanced', 'Deep'];
+const VALID_CONTENT_TYPES = ['mainText', 'markdownText', 'richMainBody', 'summary'];
+const VALID_CATEGORIES = ['finance', 'law', 'medical', 'internet', 'tax', 'news_province', 'news_center'];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 function parseArgs(args) {
   const options = {};
   for (let i = 0; i < args.length; i++) {
@@ -28,17 +29,11 @@ function parseArgs(args) {
   return options;
 }
 
-/**
- * Load API key from environment or config file
- * @returns {string|null} API key
- */
 async function loadApiKey() {
-  // First check environment variable
   if (process.env.ALIYUN_IQS_API_KEY) {
     return process.env.ALIYUN_IQS_API_KEY;
   }
 
-  // Try loading from config file
   try {
     const fs = await import('fs');
     const path = await import('path');
@@ -59,46 +54,86 @@ async function loadApiKey() {
   return null;
 }
 
-/**
- * Execute search query
- * @param {Object} options - Search options
- * @returns {Promise<Array>} Formatted search results
- */
+function parseContents(contentsOpt) {
+  const flags = { mainText: false, markdownText: false, richMainBody: false, summary: false };
+  if (!contentsOpt || contentsOpt === true) {
+    return flags;
+  }
+  const requested = String(contentsOpt).split(',').map(s => s.trim()).filter(Boolean);
+  for (const name of requested) {
+    if (!VALID_CONTENT_TYPES.includes(name)) {
+      throw new Error(`Invalid contents "${name}". Valid values: ${VALID_CONTENT_TYPES.join(', ')}`);
+    }
+    flags[name] = true;
+  }
+  return flags;
+}
+
 async function search(options) {
   const apiKey = await loadApiKey();
   if (!apiKey) {
     throw new Error('ALIYUN_IQS_API_KEY environment variable not set');
   }
 
-  if (!options.query) {
+  if (!options.query || typeof options.query !== 'string') {
     throw new Error('Query is required. Use --query "search terms"');
   }
-
-  // Validate query length
-  if (typeof options.query === 'string' && (options.query.length < 1 || options.query.length > 500)) {
+  if (options.query.length < 1 || options.query.length > 500) {
     throw new Error('Query length must be between 1 and 500 characters');
   }
 
-  // Validate numResults range
-  if (options.numResults !== undefined) {
-    const numResults = parseInt(options.numResults, 10);
-    if (isNaN(numResults) || numResults < 1 || numResults > 10) {
-      throw new Error('numResults must be a number between 1 and 10');
+  if (options.engineType && !VALID_ENGINE_TYPES.includes(options.engineType)) {
+    throw new Error(`Invalid engineType "${options.engineType}". Valid values: ${VALID_ENGINE_TYPES.join(', ')}`);
+  }
+
+  if (options.category) {
+    const cats = String(options.category).split(',').map(s => s.trim()).filter(Boolean);
+    for (const c of cats) {
+      if (!VALID_CATEGORIES.includes(c)) {
+        throw new Error(`Invalid category "${c}". Valid values: ${VALID_CATEGORIES.join(', ')}`);
+      }
     }
   }
 
-  // 天气等垂类场景需要 locationInfo，且仅 engineType=Generic 时 sceneItems 才会返回（参考阿里云文档 2883041），
+  const advancedParams = {};
+  if (options.numResults !== undefined) {
+    const numResults = parseInt(options.numResults, 10);
+    if (isNaN(numResults) || numResults < 1 || numResults > 50) {
+      throw new Error('numResults must be a number between 1 and 50');
+    }
+    advancedParams.numResults = String(numResults);
+  }
+  if (options.startDate) {
+    if (!DATE_RE.test(options.startDate)) {
+      throw new Error('startDate must be in YYYY-MM-DD format');
+    }
+    advancedParams.startPublishedDate = options.startDate;
+  }
+  if (options.endDate) {
+    if (!DATE_RE.test(options.endDate)) {
+      throw new Error('endDate must be in YYYY-MM-DD format');
+    }
+    advancedParams.endPublishedDate = options.endDate;
+  }
+
+  // 天气等垂类场景需要 locationInfo，且仅 engineType=Generic 时 sceneItems 才会返回，
   // 故提供 --city/--ip 且未显式指定 engineType 时默认切换为 Generic
   const hasLocation = Boolean(options.city || options.ip);
+  const engineType = options.engineType || (hasLocation ? 'Generic' : 'LiteAdvanced');
+
   const body = {
     query: options.query,
-    engineType: options.engineType || (hasLocation ? 'Generic' : 'LiteAdvanced'),
+    engineType,
     timeRange: options.timeRange || 'NoLimit',
     contents: {
-      mainText: options.contents !== 'summary',  // 默认为 true，除非显式指定为 'summary'
-      summary: options.contents == 'summary'
+      ...parseContents(options.contents),
+      rerankScore: true
     }
   };
+
+  if (Object.keys(advancedParams).length > 0) {
+    body.advancedParams = advancedParams;
+  }
 
   if (hasLocation) {
     body.locationInfo = {};
@@ -114,14 +149,7 @@ async function search(options) {
     body.category = options.category;
   }
 
-  // Set the number of results if specified
-  if (options.numResults) {
-    body.numResults = parseInt(options.numResults, 10);
-  }
-
-  // Set timeout (default 10 seconds)
   const timeout = parseInt(options.timeout, 10) || 10000;
-
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -131,8 +159,8 @@ async function search(options) {
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': apiKey,
-        'User-Agent': 'AlibabaCloud-Agent-Skills/alibabacloud-iqs-search',
-        'x-iqs-source': 'skill.alibabacloud-iqs-search',
+        'User-Agent': 'AlibabaCloud-Agent-Skills/iqs-search',
+        'x-iqs-source': 'skill.iqs-search',
       },
       body: JSON.stringify(body),
       signal: controller.signal
@@ -146,22 +174,21 @@ async function search(options) {
       throw new Error(`${data.errorCode}: ${data.errorMessage}`);
     }
 
-    // Format results and apply numResults limit if specified
-    let formattedResults = formatResults(data.pageItems || []);
-
-    if (options.numResults) {
-      const limit = parseInt(options.numResults, 10);
-      formattedResults = formattedResults.slice(0, limit);
-    }
-
-    // 垂类场景结果（天气/时间等）比网页召回更准确，有召回时优先输出；
-    // 无 sceneItems 时保持纯数组输出，避免破坏既有用法
+    const pageItems = formatResults(data.pageItems || []);
     const sceneItems = formatSceneItems(data.sceneItems || []);
-    if (sceneItems.length > 0) {
-      return { sceneItems, pageItems: formattedResults };
-    }
 
-    return formattedResults;
+    return {
+      sceneItems,
+      pageItems,
+      meta: {
+        requestId: data.requestId,
+        searchTime: data.searchInformation?.searchTime,
+        engineType: data.queryContext?.engineType || engineType,
+        originalQuery: data.queryContext?.originalQuery?.query,
+        rewrite: data.queryContext?.rewrite,
+        costCredits: data.costCredits
+      }
+    };
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
@@ -171,11 +198,6 @@ async function search(options) {
   }
 }
 
-/**
- * Format search results
- * @param {Array} items - Raw search results
- * @returns {Array} Formatted results
- */
 function formatResults(items) {
   return items.map((item, index) => {
     const formattedItem = {
@@ -188,24 +210,26 @@ function formatResults(items) {
       relevance: item.rerankScore
     };
 
-    // Include summary if it exists in the item
+    if (item.images?.length) {
+      formattedItem.images = item.images;
+    }
     if (item.summary) {
       formattedItem.summary = item.summary;
     }
-
     if (item.mainText) {
       formattedItem.mainText = item.mainText;
+    }
+    if (item.markdownText) {
+      formattedItem.markdownText = item.markdownText;
+    }
+    if (item.richMainBody) {
+      formattedItem.richMainBody = item.richMainBody;
     }
 
     return formattedItem;
   });
 }
 
-/**
- * Format scene items (structured vertical results, e.g. weather/time)
- * @param {Array} items - Raw scene items
- * @returns {Array} Scene items with detail parsed as JSON when possible
- */
 function formatSceneItems(items) {
   return items.map(item => {
     let detail = item.detail;
@@ -220,7 +244,6 @@ function formatSceneItems(items) {
   });
 }
 
-// Parse CLI arguments and execute
 const args = parseArgs(process.argv.slice(2));
 search(args).then(results => {
   console.log(JSON.stringify(results, null, 2));

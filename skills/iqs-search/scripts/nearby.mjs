@@ -224,6 +224,12 @@ function formatResults(items) {
       formattedItem.metadata = { phone, score, mainTag, businessArea, averageSpend, dailyOpeningHours, weeklyOpeningDays };
     }
 
+    if (Array.isArray(item.images) && item.images.length > 0) {
+      formattedItem.images = item.images
+        .filter(img => img && img.url)
+        .map(img => ({ title: img.title, url: img.url }));
+    }
+
     // 过滤空值字段，保持输出精简
     for (const key of Object.keys(formattedItem)) {
       if (formattedItem[key] === null || formattedItem[key] === undefined) {
